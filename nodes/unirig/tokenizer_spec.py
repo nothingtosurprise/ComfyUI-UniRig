@@ -30,7 +30,7 @@ class TokenizerConfig():
     order_config: Union[OrderConfig, None]
 
     @staticmethod
-    def parse(config) -> 'TokenizerConfig':
+    def parse(config, base_path=None) -> 'TokenizerConfig':
         order_config = config.get('order_config', None)
 
         return TokenizerConfig(
@@ -38,7 +38,7 @@ class TokenizerConfig():
             num_discrete=config.num_discrete,
             continuous_range=config.continuous_range,cls_token_id=config.cls_token_id,
             parts_token_id=config.get('parts_token_id', {}),
-            order_config=OrderConfig.parse(order_config) if order_config is not None else None,
+            order_config=OrderConfig.parse(order_config, base_path=base_path) if order_config is not None else None,
         )
 
 @dataclass(frozen=True)

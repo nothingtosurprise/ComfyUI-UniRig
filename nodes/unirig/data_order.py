@@ -1,3 +1,4 @@
+import os
 from typing import Dict, List, Union
 from dataclasses import dataclass
 import yaml
@@ -23,13 +24,15 @@ class OrderConfig(ConfigSpec):
     parts_order: Dict[str, List[str]]
     
     @classmethod
-    def parse(cls, config):
+    def parse(cls, config, base_path=None):
         cls.check_keys(config)
         skeleton_path = config.skeleton_path
         parts = {}
         parts_order = {}
         for (cls, path) in skeleton_path.items():
             assert cls not in parts, 'cls conflicts'
+            if base_path and not os.path.isabs(path):
+                path = os.path.join(base_path, path)
             d = Box(yaml.safe_load(open(path, 'r')))
             parts[cls] = d.parts
             parts_order[cls] = d.parts_order
