@@ -28,8 +28,6 @@ from typing import Dict, List
 
 log = logging.getLogger("unirig")
 
-ops = comfy.ops.manual_cast
-
 
 # ============================================================================
 # Positional embedding (buffer only, no operations= needed)
@@ -86,7 +84,7 @@ class CrossAttnProjections(nn.Module):
 
     Checkpoint keys: Wq.weight, Wq.bias, Wkv.weight, Wkv.bias, out_proj.weight, out_proj.bias
     """
-    def __init__(self, feat_dim, num_heads, dtype=None, device=None, operations=ops):
+    def __init__(self, feat_dim, num_heads, dtype=None, device=None, operations=None):
         super().__init__()
         self.num_heads = num_heads
         self.Wq = operations.Linear(feat_dim, feat_dim, device=device, dtype=dtype)
@@ -102,7 +100,7 @@ class CrossAttnProjections(nn.Module):
 
 
 class ResidualCrossAttn(nn.Module):
-    def __init__(self, feat_dim: int, num_heads: int, dtype=None, device=None, operations=ops):
+    def __init__(self, feat_dim: int, num_heads: int, dtype=None, device=None, operations=None):
         super().__init__()
         assert feat_dim % num_heads == 0, "feat_dim must be divisible by num_heads"
         self.num_heads = num_heads
@@ -138,7 +136,7 @@ class BoneEncoder(nn.Module):
         num_attn: int,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
         self.feat_bone_dim = feat_bone_dim
@@ -182,7 +180,7 @@ class BoneEncoder(nn.Module):
 
 
 class SkinweightPred(nn.Module):
-    def __init__(self, in_dim, mlp_dim, dtype=None, device=None, operations=ops):
+    def __init__(self, in_dim, mlp_dim, dtype=None, device=None, operations=None):
         super().__init__()
         self.net = nn.Sequential(
             operations.Linear(in_dim, mlp_dim, device=device, dtype=dtype),
@@ -210,8 +208,11 @@ class SkinweightPred(nn.Module):
 
 class UniRigSkin(ModelSpec):
 
-    def __init__(self, mesh_encoder, global_encoder, dtype=None, device=None, operations=ops, **kwargs):
+    def __init__(self, mesh_encoder, global_encoder, dtype=None, device=None, operations=None, **kwargs):
         super().__init__()
+        if operations is None:
+            operations = comfy.ops.disable_weight_init
+        self.dtype = dtype
 
         self.num_train_vertex       = kwargs['num_train_vertex']
         self.feat_dim               = kwargs['feat_dim']
@@ -223,6 +224,15 @@ class UniRigSkin(ModelSpec):
         self.bone_embed_dim         = kwargs['bone_embed_dim']
         self.voxel_mask             = kwargs.get('voxel_mask', 2)
 
+        # Thread dtype/device/operations through to encoders
+        mesh_encoder = dict(mesh_encoder)
+        mesh_encoder.setdefault('dtype', dtype)
+        mesh_encoder.setdefault('device', device)
+        mesh_encoder.setdefault('operations', operations)
+        global_encoder = dict(global_encoder)
+        global_encoder.setdefault('dtype', dtype)
+        global_encoder.setdefault('device', device)
+        global_encoder.setdefault('operations', operations)
         self.mesh_encoder = get_mesh_encoder(**mesh_encoder)
         self.global_encoder = get_mesh_encoder(**global_encoder)
         if isinstance(self.mesh_encoder, MAP_MESH_ENCODER.ptv3obj):

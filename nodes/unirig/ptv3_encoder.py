@@ -41,8 +41,6 @@ import logging
 
 log = logging.getLogger("unirig")
 
-ops = comfy.ops.manual_cast
-
 # ============================================================================
 # Utilities (from pointcept/models/utils/misc.py)
 # ============================================================================
@@ -308,7 +306,7 @@ class SerializedAttention(PointModule):
         enable_qknorm=False,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
         assert channels % num_heads == 0, f"channels {channels} must be divisible by num_heads {num_heads}"
@@ -486,7 +484,7 @@ class MLP(nn.Module):
         drop=0.0,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
         out_channels = out_channels or in_channels
@@ -533,7 +531,7 @@ class Block(PointModule):
         enable_qknorm=False,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
         self.channels = channels
@@ -627,7 +625,7 @@ class SerializedPooling(PointModule):
         traceable=True,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -731,7 +729,7 @@ class Embedding(PointModule):
         res_linear=False,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -799,9 +797,11 @@ class PointTransformerV3Object(PointModule):
         res_linear=True,
         dtype=None,
         device=None,
-        operations=ops,
+        operations=None,
     ):
         super().__init__()
+        if operations is None:
+            operations = comfy.ops.disable_weight_init
         self.num_stages = len(enc_depths)
         self.order = [order] if isinstance(order, str) else order
         self.cls_mode = cls_mode

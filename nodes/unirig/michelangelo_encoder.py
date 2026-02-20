@@ -30,8 +30,6 @@ from .attention import comfy_attention
 
 log = logging.getLogger("unirig")
 
-ops = comfy.ops.manual_cast
-
 # ============================================================================
 # Embedders
 # ============================================================================
@@ -82,7 +80,7 @@ class MLP(nn.Module):
                  width: int,
                  hidden_width_scale: int = 4,
                  init_scale: float = 1.0,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.width = width
         self.c_fc = operations.Linear(width, width * hidden_width_scale, device=device, dtype=dtype)
@@ -119,7 +117,7 @@ class MultiheadAttention(nn.Module):
                  init_scale: float = 1.0,
                  qkv_bias: bool = True,
                  flash: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.n_ctx = n_ctx
         self.width = width
@@ -164,7 +162,7 @@ class MultiheadCrossAttention(nn.Module):
                  flash: bool = False,
                  n_data: Optional[int] = None,
                  data_width: Optional[int] = None,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.n_data = n_data
         self.width = width
@@ -196,7 +194,7 @@ class ResidualAttentionBlock(nn.Module):
                  qkv_bias: bool = True,
                  flash: bool = False,
                  use_checkpoint: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.attn = MultiheadAttention(
             device=device, dtype=dtype, n_ctx=n_ctx, width=width, heads=heads,
@@ -224,7 +222,7 @@ class ResidualCrossAttentionBlock(nn.Module):
                  init_scale: float = 0.25,
                  qkv_bias: bool = True,
                  flash: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         if data_width is None:
             data_width = width
@@ -258,7 +256,7 @@ class Transformer(nn.Module):
                  qkv_bias: bool = True,
                  flash: bool = False,
                  use_checkpoint: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.n_ctx = n_ctx
         self.width = width
@@ -308,7 +306,7 @@ class CrossAttentionEncoder(nn.Module):
                  use_full_input: bool = True,
                  token_num: int = 256,
                  no_query: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.query_method = query_method
         self.token_num = token_num
@@ -413,7 +411,7 @@ class CrossAttentionDecoder(nn.Module):
                  use_checkpoint: bool = False,
                  mlp_width_scale: int = 4,
                  supervision_type: str = 'occupancy',
-                 operations=ops):
+                 operations=None):
         super().__init__()
         self.fourier_embedder = fourier_embedder
         self.supervision_type = supervision_type
@@ -470,8 +468,10 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
                  freeze_encoder: bool = False,
                  decoder_mlp_width_scale: int = 4,
                  residual_kl: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
+        if operations is None:
+            operations = comfy.ops.disable_weight_init
         self.use_checkpoint = use_checkpoint
         self.num_latents = num_latents
         self.supervision_type = supervision_type
@@ -544,7 +544,7 @@ class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
                  freeze_encoder: bool = False,
                  decoder_mlp_width_scale: int = 4,
                  residual_kl: bool = False,
-                 operations=ops):
+                 operations=None):
         MAP_DTYPE = {'float32': torch.float32, 'float16': torch.float16, 'bfloat16': torch.bfloat16}
         if dtype is not None and isinstance(dtype, str):
             dtype = MAP_DTYPE[dtype]
@@ -601,8 +601,10 @@ class ShapeAsLatentPerceiverEncoder(ShapeAsLatentModule):
                  use_full_input: bool = True,
                  freeze_encoder: bool = False,
                  residual_kl: bool = False,
-                 operations=ops):
+                 operations=None):
         super().__init__()
+        if operations is None:
+            operations = comfy.ops.disable_weight_init
         MAP_DTYPE = {'float32': torch.float32, 'float16': torch.float16, 'bfloat16': torch.bfloat16}
         if dtype is not None and isinstance(dtype, str):
             dtype = MAP_DTYPE[dtype]

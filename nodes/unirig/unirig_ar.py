@@ -26,8 +26,6 @@ import logging
 
 log = logging.getLogger("unirig")
 
-ops = comfy.ops.manual_cast
-
 # Load OPT-350m config from local JSON file (no HuggingFace download needed)
 _CONFIG_PATH = Path(__file__).parent / "opt_350m_config.json"
 with open(_CONFIG_PATH) as f:
@@ -60,8 +58,11 @@ class VocabSwitchingLogitsProcessor(LogitsProcessor):
 
 class UniRigAR(ModelSpec):
 
-    def __init__(self, llm, mesh_encoder, dtype=None, device=None, operations=ops, **kwargs):
+    def __init__(self, llm, mesh_encoder, dtype=None, device=None, operations=None, **kwargs):
         super().__init__()
+        if operations is None:
+            operations = comfy.ops.disable_weight_init
+        self.dtype = dtype
         log.info("Initializing UniRigAR model...")
 
         self.tokenizer: TokenizerSpec = kwargs.get('tokenizer')
@@ -89,8 +90,13 @@ class UniRigAR(ModelSpec):
         self.transformer = AutoModelForCausalLM.from_config(config=llm_config)
         log.info("[OK] Transformer loaded")
 
-        self.hidden_size = llm.hidden_size
+        self.hidden_size = llm['hidden_size']
 
+        # Thread dtype/device/operations through to mesh encoder
+        mesh_encoder = dict(mesh_encoder)
+        mesh_encoder.setdefault('dtype', dtype)
+        mesh_encoder.setdefault('device', device)
+        mesh_encoder.setdefault('operations', operations)
         log.info("Loading mesh encoder...")
         self.mesh_encoder = get_mesh_encoder(**mesh_encoder)
         log.info("[OK] Mesh encoder loaded")
@@ -104,6 +110,10 @@ class UniRigAR(ModelSpec):
             raise NotImplementedError()
 
     def encode_mesh_cond(self, vertices: FloatTensor, normals: FloatTensor) -> FloatTensor:
+        # Cast inputs to model dtype (safety net)
+        if self.dtype is not None:
+            vertices = vertices.to(dtype=self.dtype)
+            normals = normals.to(dtype=self.dtype)
         assert not torch.isnan(vertices).any()
         assert not torch.isnan(normals).any()
         if (
