@@ -1,7 +1,7 @@
 python = "3.11"  # Required by bpy 4.2
 
 [cuda]
-packages = ["torch-scatter", "torch-cluster", "flash-attn", "torch", "torchvision"]
+packages = ["torch-scatter", "torch-cluster", "flash-attn", "torch", "torchvision", "cumm", "spconv"]
 
 [pypi-dependencies]
 # Blender
@@ -24,14 +24,12 @@ omegaconf = "*"
 python-box = "*"
 huggingface_hub = "*"
 wandb = "*"
-spconv-cu121 = "*"
 hf_xet = "*"
 
 # Geometry
 fast-simplification = "*"
 pyrender = "*"
 libigl = "*"
-cumm-cu121 = "==0.7.11"
 pccm = "*"
 shapely = "*"
 

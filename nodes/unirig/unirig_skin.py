@@ -336,10 +336,9 @@ class UniRigSkin(ModelSpec):
 
         if isinstance(self.mesh_encoder, MAP_MESH_ENCODER.ptv3obj):
             feat = torch.cat([vertices, normals, torch.zeros_like(vertices)], dim=-1)
-            # Explicit float32 cast for spconv precision (replaces torch.autocast)
             ptv3_input = {
-                'coord': vertices.reshape(-1, 3).float(),
-                'feat': feat.reshape(-1, 9).float(),
+                'coord': vertices.reshape(-1, 3),
+                'feat': feat.reshape(-1, 9),
                 'offset': torch.tensor(batch['offset']),
                 'grid_size': self.grid_size,
             }
