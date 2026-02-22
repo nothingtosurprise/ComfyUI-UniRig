@@ -428,8 +428,7 @@ class PCAE(nn.Module):
 
     def load(self, pth_path: str, epoch=-1, strict=True, adapt=True):
         pth_path = find_ckpt(pth_path, epoch=epoch)
-        checkpoint = comfy.utils.load_torch_file(pth_path)
-        model_state_dict = checkpoint["model"]
+        model_state_dict = comfy.utils.load_torch_file(pth_path)
         if adapt:
             model_state_dict = self.adapt_ckpt(model_state_dict)
         self.load_state_dict(model_state_dict, strict=strict)
@@ -440,7 +439,8 @@ class PCAE(nn.Module):
         return self
 
     def load_base(self, pth_path: str):
-        self.base.load_state_dict(comfy.utils.load_torch_file(pth_path)["model"], strict=True)
+        state_dict = comfy.utils.load_torch_file(pth_path)
+        self.base.load_state_dict(state_dict, strict=True)
         log.info("Loaded base model from %s", pth_path)
         return self
 
