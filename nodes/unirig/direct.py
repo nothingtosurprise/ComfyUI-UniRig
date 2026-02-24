@@ -17,8 +17,10 @@ import comfy.model_patcher
 import comfy.utils
 
 log = logging.getLogger("unirig")
-# Shared model cache from load_model.py (single source of truth)
-from ...load_model import _MODEL_CACHE
+
+# Local model cache for the worker process. Keeps loaded models + ModelPatchers
+# in memory across prompt executions within the same persistent worker.
+_loaded_models = {}
 
 
 def sample_mesh_surface(
@@ -119,6 +121,15 @@ def _get_device():
     return comfy.model_management.get_torch_device()
 
 
+_DTYPE_MAP = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
+
+def _resolve_dtype(dtype):
+    """Convert string dtype (e.g. 'bf16') to torch.dtype, pass through if already a dtype."""
+    if isinstance(dtype, str):
+        return _DTYPE_MAP.get(dtype, torch.float32)
+    return dtype
+
+
 def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto"):
     """
     Load the skeleton (AR) model directly.
@@ -133,7 +144,6 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     Returns:
         (model, tokenizer) tuple - model on CPU with requested dtype
     """
-    import os
     from pathlib import Path
     from box import Box
     import yaml
@@ -154,25 +164,17 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
         log.info("Attention backend: auto (flash_attn=%s)", unirig_ar.FLASH_ATTN_AVAILABLE)
 
     unirig_path = Path(__file__).parent
-    original_cwd = os.getcwd()
-    os.chdir(unirig_path)
+    config_dir = unirig_path / 'configs'
 
-    try:
-        config_dir = unirig_path / 'configs'
+    with open(config_dir / 'model' / 'unirig_ar_350m_1024_81920_float32.yaml') as f:
+        model_config = Box(yaml.safe_load(f))
 
-        with open(config_dir / 'model' / 'unirig_ar_350m_1024_81920_float32.yaml') as f:
-            model_config = Box(yaml.safe_load(f))
+    with open(config_dir / 'tokenizer' / 'tokenizer_parts_articulationxl_256.yaml') as f:
+        tokenizer_config = Box(yaml.safe_load(f))
 
-        with open(config_dir / 'tokenizer' / 'tokenizer_parts_articulationxl_256.yaml') as f:
-            tokenizer_config = Box(yaml.safe_load(f))
+    tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=tokenizer_config, base_path=str(unirig_path)))
 
-        tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=tokenizer_config))
-
-        # Build model on meta device (zero memory, no random init)
-        with torch.device("meta"):
-            model = get_model(tokenizer=tokenizer, **model_config)
-    finally:
-        os.chdir(original_cwd)
+    model = get_model(tokenizer=tokenizer, **model_config)
 
     # Load weights with comfy.utils (safe, memory-efficient)
     log.info("Loading skeleton weights from %s", checkpoint_path)
@@ -184,10 +186,10 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
         new_key = k[6:] if k.startswith('model.') else k
         cleaned_state_dict[new_key] = v
 
-    # assign=True for meta device -> direct weight assignment
-    model.load_state_dict(cleaned_state_dict, strict=True, assign=True)
+    model.load_state_dict(cleaned_state_dict, strict=False)
     model.eval()
 
+    dtype = _resolve_dtype(dtype)
     if dtype is not None:
         model = model.to(dtype=dtype)
         log.info("Skeleton model dtype: %s", dtype)
@@ -210,7 +212,6 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
     Returns:
         Loaded model on CPU with requested dtype
     """
-    import os
     from pathlib import Path
     from box import Box
     import yaml
@@ -219,20 +220,12 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
     log.info("Skin attention backend: ComfyUI optimized_attention")
 
     unirig_path = Path(__file__).parent
-    original_cwd = os.getcwd()
-    os.chdir(unirig_path)
+    config_dir = unirig_path / 'configs'
 
-    try:
-        config_dir = unirig_path / 'configs'
+    with open(config_dir / 'model' / 'unirig_skin.yaml') as f:
+        model_config = Box(yaml.safe_load(f))
 
-        with open(config_dir / 'model' / 'unirig_skin.yaml') as f:
-            model_config = Box(yaml.safe_load(f))
-
-        # Build model on meta device (zero memory, no random init)
-        with torch.device("meta"):
-            model = get_model(tokenizer=None, **model_config)
-    finally:
-        os.chdir(original_cwd)
+    model = get_model(tokenizer=None, **model_config)
 
     # Load weights with comfy.utils (safe, memory-efficient)
     log.info("Loading skin weights from %s", checkpoint_path)
@@ -244,11 +237,11 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         new_key = k[6:] if k.startswith('model.') else k
         cleaned_state_dict[new_key] = v
 
-    # assign=True for meta device -> direct weight assignment
-    model.load_state_dict(cleaned_state_dict, strict=True, assign=True)
+    model.load_state_dict(cleaned_state_dict, strict=False)
 
     model.eval()
 
+    dtype = _resolve_dtype(dtype)
     if dtype is not None:
         model = model.to(dtype=dtype)
         log.info("Skin model dtype: %s", dtype)
@@ -268,8 +261,9 @@ def get_skeleton_model(
     Returns:
         (ModelPatcher, tokenizer) tuple
     """
+    cache = _loaded_models
     cache_key = f"skeleton:{checkpoint_path}"
-    if cache_key not in _MODEL_CACHE or force_reload:
+    if cache_key not in cache or force_reload:
         model, tokenizer = _load_skeleton_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
         )
@@ -278,9 +272,9 @@ def get_skeleton_model(
         patcher = comfy.model_patcher.ModelPatcher(
             model, load_device=load_device, offload_device=offload_device
         )
-        _MODEL_CACHE[cache_key] = (patcher, tokenizer)
+        cache[cache_key] = (patcher, tokenizer)
         log.info("Skeleton model cached with ModelPatcher (load=%s, offload=%s)", load_device, offload_device)
-    return _MODEL_CACHE[cache_key]
+    return cache[cache_key]
 
 
 def get_skin_model(
@@ -294,8 +288,9 @@ def get_skin_model(
     Returns:
         ModelPatcher instance
     """
+    cache = _loaded_models
     cache_key = f"skin:{checkpoint_path}"
-    if cache_key not in _MODEL_CACHE or force_reload:
+    if cache_key not in cache or force_reload:
         model = _load_skin_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
         )
@@ -304,9 +299,9 @@ def get_skin_model(
         patcher = comfy.model_patcher.ModelPatcher(
             model, load_device=load_device, offload_device=offload_device
         )
-        _MODEL_CACHE[cache_key] = patcher
+        cache[cache_key] = patcher
         log.info("Skin model cached with ModelPatcher (load=%s, offload=%s)", load_device, offload_device)
-    return _MODEL_CACHE[cache_key]
+    return cache[cache_key]
 
 
 @torch.no_grad()

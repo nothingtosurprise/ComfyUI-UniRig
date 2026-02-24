@@ -21,7 +21,7 @@ except ImportError:
 # Direct bone debug extraction module (bpy as Python module)
 try:
     from .unirig import direct_extract_bone_debug as _direct_bone_debug_module
-except ImportError as e:
+except Exception as e:
     log.debug("Direct bone debug not available: %s", e)
     _direct_bone_debug_module = None
 

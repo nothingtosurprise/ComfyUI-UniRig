@@ -185,7 +185,7 @@ def _has_mesh() -> bool:
     return False
 
 
-def _matrix_to_list(matrix: Matrix) -> list:
+def _matrix_to_list(matrix: "Matrix") -> list:
     """Convert a Blender Matrix to a flat list (row-major)."""
     return [matrix[row][col] for row in range(4) for col in range(4)]
 

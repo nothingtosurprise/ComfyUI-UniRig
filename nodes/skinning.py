@@ -33,14 +33,14 @@ except ImportError:
 # Direct FBX export module (bpy as Python module)
 try:
     from .unirig import direct_export_fbx as _direct_export_module
-except ImportError as e:
+except Exception as e:
     log.info("Direct FBX export not available: %s", e)
     _direct_export_module = None
 
 # Direct inference module
 try:
     from .unirig import direct as _direct_inference_module
-except ImportError as e:
+except Exception as e:
     log.info("Direct inference not available: %s", e)
     _direct_inference_module = None
 

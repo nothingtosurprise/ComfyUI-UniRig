@@ -252,13 +252,13 @@ class UniRigLoadModel:
         device = mm.get_torch_device()
         if precision == "auto":
             if mm.should_use_bf16(device):
-                dtype = torch.bfloat16
+                dtype = "bf16"
             elif mm.should_use_fp16(device):
-                dtype = torch.float16
+                dtype = "fp16"
             else:
-                dtype = torch.float32
+                dtype = "fp32"
         else:
-            dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
+            dtype = precision
 
         log.info("Resolved precision: %s -> %s", precision, dtype)
         log.info("Attention backend: %s", attn_backend)
