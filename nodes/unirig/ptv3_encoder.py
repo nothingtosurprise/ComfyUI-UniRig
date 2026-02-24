@@ -5,8 +5,8 @@ Consolidates all PTv3/pointcept classes from the original
 pointcept/ subdirectory into a single flat file with
 operations= support for Linear and LayerNorm layers.
 
-spconv and flash_attn serialized attention are kept as-is
-(varlen packed format is incompatible with ComfyUI's standard attention).
+SerializedAttention uses dispatch_varlen_attention (native, no external deps).
+Backend priority: sage2 > flash > xformers > sdpa.
 
 Classes:
     Point, PointModule, PointSequential,
@@ -28,18 +28,15 @@ from addict import Dict
 from timm.models.layers import DropPath
 from einops import rearrange
 
-try:
-    import flash_attn
-except ImportError:
-    flash_attn = None
-
 import comfy.ops
+from comfy.attention_sparse import dispatch_varlen_attention
 
 from .serialization import encode, decode
 
 import logging
 
 log = logging.getLogger("unirig")
+
 
 # ============================================================================
 # Utilities (from pointcept/models/utils/misc.py)
@@ -245,7 +242,7 @@ class PointSequential(PointModule):
 
 
 # ============================================================================
-# Attention components (kept as-is — varlen flash_attn incompatible with ComfyUI)
+# Attention components
 # ============================================================================
 
 class RPE(torch.nn.Module):
@@ -323,11 +320,6 @@ class SerializedAttention(PointModule):
             self.qknorm = QueryKeyNorm(channels, num_heads)
         else:
             log.warning("WARNING: enable_qknorm is False in PTv3Object and training may be fragile")
-
-        if enable_flash and flash_attn is None:
-            log.info("flash_attn not available for PTv3Object, falling back to standard PyTorch attention")
-            enable_flash = False
-            self.enable_flash = False
 
         if enable_flash:
             assert (
@@ -454,14 +446,12 @@ class SerializedAttention(PointModule):
             attn = self.attn_drop(attn).to(qkv.dtype)
             feat = (attn @ v).transpose(1, 2).reshape(-1, C)
         else:
-            feat = flash_attn.flash_attn_varlen_qkvpacked_func(
-                qkv.half().reshape(-1, 3, H, C // H),
-                cu_seqlens,
-                max_seqlen=self.patch_size,
-                dropout_p=self.attn_drop if self.training else 0,
-                softmax_scale=self.scale,
+            qkv_packed = qkv.reshape(-1, 3, H, C // H)
+            q, k, v = qkv_packed.unbind(dim=1)  # each [T, H, D]
+            feat = dispatch_varlen_attention(
+                q, k, v, cu_seqlens, cu_seqlens,
+                self.patch_size, self.patch_size,
             ).reshape(-1, C)
-            feat = feat.to(qkv.dtype)
         feat = feat[inverse]
 
         feat = self.proj(feat)

@@ -1,5 +1,14 @@
 """UniRig Nodes."""
 
+import pathlib
+import comfy_sparse_attn
+from comfy_sparse_attn import setup_link
+_PKG = pathlib.Path(comfy_sparse_attn.__file__).parent
+setup_link(_PKG / "sparse.py",           "sparse.py")
+setup_link(_PKG / "ops_sparse.py",       "ops_sparse.py")
+setup_link(_PKG / "attention_sparse.py", "attention_sparse.py")
+del pathlib, comfy_sparse_attn, setup_link, _PKG
+
 from .mesh_io import UniRigLoadMesh, UniRigSaveMesh
 from .load_model import UniRigLoadModel, MIALoadModel
 from .auto_rig import UniRigAutoRig
