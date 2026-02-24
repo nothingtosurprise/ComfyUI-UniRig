@@ -21,6 +21,12 @@ Change their pose, export a new one
 
 ## Video demos
 
+
+
+https://github.com/user-attachments/assets/1cd513cd-ca51-4828-8125-ee89f62af3b6
+
+
+
 Rigging/skinning workflow (video is sped up for documentation purposes):
 
 
