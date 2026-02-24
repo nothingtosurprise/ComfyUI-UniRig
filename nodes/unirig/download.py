@@ -28,20 +28,20 @@ def download(ckpt_name: str) -> str:
         'experiments/skin/skeleton/model.ckpt': 'skin.safetensors',
     }
 
+    if ckpt_name not in MAP:
+        log.info("Unknown checkpoint: %s", ckpt_name)
+        return ckpt_name
+
+    filename = MAP[ckpt_name]
+    models_dir = _get_models_dir()
+    local_path = models_dir / filename
+
+    # Check if already exists
+    if local_path.exists():
+        log.info("Found model: %s", local_path)
+        return str(local_path)
+
     try:
-        if ckpt_name not in MAP:
-            log.info("Unknown checkpoint: %s", ckpt_name)
-            return ckpt_name
-
-        filename = MAP[ckpt_name]
-        models_dir = _get_models_dir()
-        local_path = models_dir / filename
-
-        # Check if already exists
-        if local_path.exists():
-            log.info("Found model: %s", local_path)
-            return str(local_path)
-
         # Create directory if needed
         models_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,8 +55,8 @@ def download(ckpt_name: str) -> str:
         )
 
         log.info("Downloaded to: %s", local_path)
-        return str(local_path)
-
     except Exception as e:
-        log.info("Failed to download %s: %s", ckpt_name, e)
-        return ckpt_name
+        log.warning("Failed to download %s: %s", ckpt_name, e)
+
+    # Always return the expected local safetensors path
+    return str(local_path)
