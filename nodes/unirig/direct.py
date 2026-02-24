@@ -9,11 +9,11 @@ Uses ComfyUI ModelPatcher for proper memory management.
 
 import torch
 import numpy as np
-from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 import logging
 import comfy.model_management
 import comfy.model_patcher
+import comfy.ops
 import comfy.utils
 
 log = logging.getLogger("unirig")
@@ -134,7 +134,7 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     """
     Load the skeleton (AR) model directly.
 
-    Uses meta device for zero-memory init, comfy.utils for safe loading.
+    Uses comfy.ops.pick_operations for dtype-aware layer initialization.
 
     Args:
         checkpoint_path: Path to skeleton.safetensors
@@ -144,13 +144,11 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     Returns:
         (model, tokenizer) tuple - model on CPU with requested dtype
     """
-    from pathlib import Path
-    from box import Box
-    import yaml
     from .tokenizer_parse import get_tokenizer
     from .tokenizer_spec import TokenizerConfig
     from .model_parse import get_model
     from . import unirig_ar
+    from .configs import AR_MODEL_CONFIG, TOKENIZER_CONFIG
 
     # Override attention backend before model creation
     if attn_backend == "sdpa":
@@ -163,18 +161,24 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     else:
         log.info("Attention backend: auto (flash_attn=%s)", unirig_ar.FLASH_ATTN_AVAILABLE)
 
-    unirig_path = Path(__file__).parent
-    config_dir = unirig_path / 'configs'
+    # Resolve dtype and pick ComfyUI operations
+    model_dtype = _resolve_dtype(dtype)
+    if model_dtype is not None:
+        operations = comfy.ops.pick_operations(model_dtype, model_dtype)
+    else:
+        operations = comfy.ops.disable_weight_init
+    log.info("Skeleton ops: %s (dtype=%s)", operations, model_dtype)
 
-    with open(config_dir / 'model' / 'unirig_ar_350m_1024_81920_float32.yaml') as f:
-        model_config = Box(yaml.safe_load(f))
+    # Build tokenizer from inlined config
+    tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=TOKENIZER_CONFIG))
 
-    with open(config_dir / 'tokenizer' / 'tokenizer_parts_articulationxl_256.yaml') as f:
-        tokenizer_config = Box(yaml.safe_load(f))
-
-    tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=tokenizer_config, base_path=str(unirig_path)))
-
-    model = get_model(tokenizer=tokenizer, **model_config)
+    # Build model with dtype/device/operations injected
+    model_config = dict(AR_MODEL_CONFIG)
+    model_config['tokenizer'] = tokenizer
+    model_config['dtype'] = model_dtype
+    model_config['device'] = 'cpu'
+    model_config['operations'] = operations
+    model = get_model(**model_config)
 
     # Load weights with comfy.utils (safe, memory-efficient)
     log.info("Loading skeleton weights from %s", checkpoint_path)
@@ -189,10 +193,10 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     model.load_state_dict(cleaned_state_dict, strict=False)
     model.eval()
 
-    dtype = _resolve_dtype(dtype)
-    if dtype is not None:
-        model = model.to(dtype=dtype)
-        log.info("Skeleton model dtype: %s", dtype)
+    # Safety net: ensure all weights match requested dtype
+    if model_dtype is not None:
+        model = model.to(dtype=model_dtype)
+        log.info("Skeleton model dtype: %s", model_dtype)
 
     log.info("Skeleton model ready (on CPU, will be moved to GPU by ModelPatcher)")
     return model, tokenizer
@@ -202,7 +206,7 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
     """
     Load the skinning model directly.
 
-    Uses meta device for zero-memory init, comfy.utils for safe loading.
+    Uses comfy.ops.pick_operations for dtype-aware layer initialization.
 
     Args:
         checkpoint_path: Path to skin.safetensors
@@ -212,19 +216,24 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
     Returns:
         Loaded model on CPU with requested dtype
     """
-    from pathlib import Path
-    from box import Box
-    import yaml
     from .model_parse import get_model
+    from .configs import SKIN_MODEL_CONFIG
 
     log.info("Skin attention backend: ComfyUI optimized_attention")
 
-    unirig_path = Path(__file__).parent
-    config_dir = unirig_path / 'configs'
+    # Resolve dtype and pick ComfyUI operations
+    model_dtype = _resolve_dtype(dtype)
+    if model_dtype is not None:
+        operations = comfy.ops.pick_operations(model_dtype, model_dtype)
+    else:
+        operations = comfy.ops.disable_weight_init
+    log.info("Skin ops: %s (dtype=%s)", operations, model_dtype)
 
-    with open(config_dir / 'model' / 'unirig_skin.yaml') as f:
-        model_config = Box(yaml.safe_load(f))
-
+    # Build model with dtype/device/operations injected
+    model_config = dict(SKIN_MODEL_CONFIG)
+    model_config['dtype'] = model_dtype
+    model_config['device'] = 'cpu'
+    model_config['operations'] = operations
     model = get_model(tokenizer=None, **model_config)
 
     # Load weights with comfy.utils (safe, memory-efficient)
@@ -238,13 +247,12 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         cleaned_state_dict[new_key] = v
 
     model.load_state_dict(cleaned_state_dict, strict=False)
-
     model.eval()
 
-    dtype = _resolve_dtype(dtype)
-    if dtype is not None:
-        model = model.to(dtype=dtype)
-        log.info("Skin model dtype: %s", dtype)
+    # Safety net: ensure all weights match requested dtype
+    if model_dtype is not None:
+        model = model.to(dtype=model_dtype)
+        log.info("Skin model dtype: %s", model_dtype)
 
     log.info("Skin model ready (on CPU, will be moved to GPU by ModelPatcher)")
     return model
@@ -262,7 +270,7 @@ def get_skeleton_model(
         (ModelPatcher, tokenizer) tuple
     """
     cache = _loaded_models
-    cache_key = f"skeleton:{checkpoint_path}"
+    cache_key = f"skeleton:{checkpoint_path}:{dtype}"
     if cache_key not in cache or force_reload:
         model, tokenizer = _load_skeleton_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
@@ -289,7 +297,7 @@ def get_skin_model(
         ModelPatcher instance
     """
     cache = _loaded_models
-    cache_key = f"skin:{checkpoint_path}"
+    cache_key = f"skin:{checkpoint_path}:{dtype}"
     if cache_key not in cache or force_reload:
         model = _load_skin_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
@@ -341,9 +349,10 @@ def predict_skeleton(
     comfy.model_management.load_models_gpu([patcher])
     device = patcher.load_device
 
-    # Convert to tensors on the model's device
-    vertices_t = torch.from_numpy(vertices).float().to(device)
-    normals_t = torch.from_numpy(normals).float().to(device)
+    # Convert to tensors in the model's dtype
+    model_dtype = patcher.model.get_dtype() or torch.float32
+    vertices_t = torch.from_numpy(vertices).to(dtype=model_dtype, device=device)
+    normals_t = torch.from_numpy(normals).to(dtype=model_dtype, device=device)
 
     # Default generation kwargs (matching ar_inference_articulationxl.yaml)
     default_kwargs = {
@@ -466,15 +475,14 @@ def predict_skinning(
         # Fallback: zero voxel_skin
         voxel_skin_weights = np.zeros((num_joints, num_vertices), dtype=np.float32)
 
-    # Prepare batch
-    # Note: offset is for PTv3 sparse convolutions - indicates where each batch element ends
-    # For a single batch with N vertices, offset = [N]
+    # Prepare batch in the model's dtype
+    model_dtype = patcher.model.get_dtype() or torch.float32
     batch = {
-        'vertices': torch.from_numpy(vertices).float().unsqueeze(0).to(device),
-        'normals': torch.from_numpy(normals).float().unsqueeze(0).to(device),
-        'joints': torch.from_numpy(joints).float().unsqueeze(0).to(device),
-        'tails': torch.from_numpy(tails).float().unsqueeze(0).to(device),
-        'voxel_skin': torch.from_numpy(voxel_skin_weights).float().unsqueeze(0).to(device),
+        'vertices': torch.from_numpy(vertices).to(dtype=model_dtype).unsqueeze(0).to(device),
+        'normals': torch.from_numpy(normals).to(dtype=model_dtype).unsqueeze(0).to(device),
+        'joints': torch.from_numpy(joints).to(dtype=model_dtype).unsqueeze(0).to(device),
+        'tails': torch.from_numpy(tails).to(dtype=model_dtype).unsqueeze(0).to(device),
+        'voxel_skin': torch.from_numpy(voxel_skin_weights).to(dtype=model_dtype).unsqueeze(0).to(device),
         'parents': torch.from_numpy(parents).long().unsqueeze(0).to(device),
         'num_bones': torch.tensor([num_joints], dtype=torch.long, device=device),
         'offset': torch.tensor([num_vertices], dtype=torch.long, device=device),  # PTv3 batch offset for single sample

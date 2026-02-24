@@ -1,10 +1,9 @@
-import os
 from typing import Dict, List, Union
 from dataclasses import dataclass
-import yaml
-from box import Box
 
 from .data_spec import ConfigSpec
+from .configs import SKELETONS
+
 import logging
 
 log = logging.getLogger("unirig")
@@ -13,29 +12,27 @@ class OrderConfig(ConfigSpec):
     '''
     Config to handle bones re-ordering.
     '''
-    
+
     # {skeleton_name: path}
     skeleton_path: Dict[str, str]
-    
+
     # {cls: {part_name: [bone_name_1, bone_name_2, ...]}}
     parts: Dict[str, Dict[str, List[str]]]
-    
+
     # {cls: parts of bones to be arranged in [part_name_1, part_name_2, ...]}
     parts_order: Dict[str, List[str]]
-    
+
     @classmethod
     def parse(cls, config, base_path=None):
         cls.check_keys(config)
-        skeleton_path = config.skeleton_path
+        skeleton_path = config['skeleton_path']
         parts = {}
         parts_order = {}
-        for (cls, path) in skeleton_path.items():
-            assert cls not in parts, 'cls conflicts'
-            if base_path and not os.path.isabs(path):
-                path = os.path.join(base_path, path)
-            d = Box(yaml.safe_load(open(path, 'r')))
-            parts[cls] = d.parts
-            parts_order[cls] = d.parts_order
+        for (skel_cls, _path) in skeleton_path.items():
+            assert skel_cls not in parts, 'cls conflicts'
+            skel_data = SKELETONS[skel_cls]
+            parts[skel_cls] = skel_data["parts"]
+            parts_order[skel_cls] = skel_data["parts_order"]
         return OrderConfig(
             skeleton_path=skeleton_path,
             parts=parts,

@@ -8,7 +8,6 @@ Actual model loading happens lazily in inference nodes via direct.py.
 import logging
 import os
 import sys
-import yaml
 from pathlib import Path
 
 import torch
@@ -19,12 +18,6 @@ log = logging.getLogger("unirig")
 # Attention backend options
 ATTN_BACKENDS = ['auto', 'flash_attn', 'sdpa']
 
-# Lazy import for Box to avoid import errors before install.py runs
-def _get_box():
-    """Lazy import for python-box."""
-    from box import Box
-    return Box
-
 # Support both relative imports (ComfyUI) and absolute imports (testing)
 try:
     from .base import UNIRIG_PATH, UNIRIG_MODELS_DIR
@@ -33,15 +26,6 @@ except ImportError:
 
 # Global config cache (for config dicts only, no model loading)
 _MODEL_CACHE = {}
-
-
-def _load_yaml_config(config_path: str):
-    """Load a YAML config file."""
-    Box = _get_box()
-    if config_path.endswith('.yaml'):
-        config_path = config_path.removesuffix('.yaml')
-    config_path += '.yaml'
-    return Box(yaml.safe_load(open(config_path, 'r')))
 
 
 class UniRigLoadSkeletonModel:
@@ -88,25 +72,15 @@ class UniRigLoadSkeletonModel:
         # Download checkpoint
         try:
             from .unirig.download import download
+            from .unirig.configs import SKELETON_CHECKPOINT
 
-            task_config_path = os.path.join(
-                UNIRIG_PATH,
-                "configs/task/quick_inference_skeleton_articulationxl_ar_256.yaml"
-            )
-            task_config = _load_yaml_config(task_config_path)
-
-            checkpoint_path = task_config.get('resume_from_checkpoint', None)
-            if checkpoint_path:
-                log.info("Downloading/verifying checkpoint...")
-                local_checkpoint = download(checkpoint_path)
-                log.info("Checkpoint ready: %s", local_checkpoint)
-            else:
-                local_checkpoint = None
+            log.info("Downloading/verifying checkpoint...")
+            local_checkpoint = download(SKELETON_CHECKPOINT)
+            log.info("Checkpoint ready: %s", local_checkpoint)
 
             model_wrapper = {
                 "type": "skeleton",
                 "model_id": model_id,
-                "task_config_path": task_config_path,
                 "checkpoint_path": local_checkpoint,
                 "unirig_path": UNIRIG_PATH,
                 "models_dir": str(UNIRIG_MODELS_DIR),
@@ -121,10 +95,6 @@ class UniRigLoadSkeletonModel:
             model_wrapper = {
                 "type": "skeleton",
                 "model_id": model_id,
-                "task_config_path": os.path.join(
-                    UNIRIG_PATH,
-                    "configs/task/quick_inference_skeleton_articulationxl_ar_256.yaml"
-                ),
                 "unirig_path": UNIRIG_PATH,
                 "models_dir": str(UNIRIG_MODELS_DIR),
             }
@@ -175,25 +145,15 @@ class UniRigLoadSkinningModel:
         # Download checkpoint
         try:
             from .unirig.download import download
+            from .unirig.configs import SKIN_CHECKPOINT
 
-            task_config_path = os.path.join(
-                UNIRIG_PATH,
-                "configs/task/quick_inference_unirig_skin.yaml"
-            )
-            task_config = _load_yaml_config(task_config_path)
-
-            checkpoint_path = task_config.get('resume_from_checkpoint', None)
-            if checkpoint_path:
-                log.info("Downloading/verifying checkpoint...")
-                local_checkpoint = download(checkpoint_path)
-                log.info("Checkpoint ready: %s", local_checkpoint)
-            else:
-                local_checkpoint = None
+            log.info("Downloading/verifying checkpoint...")
+            local_checkpoint = download(SKIN_CHECKPOINT)
+            log.info("Checkpoint ready: %s", local_checkpoint)
 
             model_wrapper = {
                 "type": "skinning",
                 "model_id": model_id,
-                "task_config_path": task_config_path,
                 "checkpoint_path": local_checkpoint,
                 "unirig_path": UNIRIG_PATH,
                 "models_dir": str(UNIRIG_MODELS_DIR),
@@ -208,10 +168,6 @@ class UniRigLoadSkinningModel:
             model_wrapper = {
                 "type": "skinning",
                 "model_id": model_id,
-                "task_config_path": os.path.join(
-                    UNIRIG_PATH,
-                    "configs/task/quick_inference_unirig_skin.yaml"
-                ),
                 "unirig_path": UNIRIG_PATH,
                 "models_dir": str(UNIRIG_MODELS_DIR),
             }
@@ -326,9 +282,9 @@ class MIALoadModel:
                     "default": "auto",
                     "tooltip": "Model precision. auto: best for your GPU (bf16 on Ampere+, fp16 on Volta/Turing, fp32 on older)."
                 }),
-                "cache_to_gpu": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Keep models on GPU for faster inference. Disable to save VRAM."
+                "attn_backend": (ATTN_BACKENDS, {
+                    "default": "auto",
+                    "tooltip": "Attention backend. auto: best available (flash_attn > sdpa). flash_attn requires flash-attn package."
                 }),
             },
         }
@@ -338,7 +294,7 @@ class MIALoadModel:
     FUNCTION = "load_models"
     CATEGORY = "UniRig/MIA"
 
-    def load_models(self, precision="auto", cache_to_gpu=True):
+    def load_models(self, precision="auto", attn_backend="auto"):
         """Return MIA config with resolved precision."""
         device = mm.get_torch_device()
         if precision == "auto":
@@ -351,9 +307,9 @@ class MIALoadModel:
         else:
             dtype = precision
 
-        log.info("MIA config: precision=%s -> %s, cache_to_gpu=%s", precision, dtype, cache_to_gpu)
+        log.info("MIA config: precision=%s -> %s, attn_backend=%s", precision, dtype, attn_backend)
         return ({
             "backend": "mia",
-            "cache_to_gpu": cache_to_gpu,
             "dtype": dtype,
+            "attn_backend": attn_backend,
         },)
