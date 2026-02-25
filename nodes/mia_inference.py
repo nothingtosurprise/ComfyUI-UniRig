@@ -255,17 +255,7 @@ def run_mia_inference(
     from .mia import BONES_IDX_DICT, KINEMATIC_TREE
 
     N = models["N"]
-
-    # Let ComfyUI manage GPU memory for all models
-    patchers = [
-        models["patcher_coarse"],
-        models["patcher_bw"],
-        models["patcher_bw_normal"],
-        models["patcher_joints"],
-        models["patcher_pose"],
-    ]
-    comfy.model_management.load_models_gpu(patchers)
-    device = patchers[0].load_device
+    device = models["patcher_coarse"].load_device
     dtype = models["dtype"]
 
     log.info("Starting MIA inference (device=%s, dtype=%s)...", device, dtype)
@@ -286,7 +276,7 @@ def run_mia_inference(
     log.info("Step 2/4: Preprocessing (model_coarse, dtype=%s)...", dtype)
     data = preprocess(
         data,
-        model_coarse=models["patcher_coarse"].model,
+        patcher_coarse=models["patcher_coarse"],
         device=device,
         dtype=dtype,
         hands_resample_ratio=models["hands_resample_ratio"],
@@ -294,14 +284,14 @@ def run_mia_inference(
         N=N,
     )
 
-    # Run main inference
+    # Run main inference (models loaded to GPU individually inside infer())
     log.info("Step 3/4: Running inference (model_bw, model_joints, model_pose, dtype=%s)...", dtype)
     data = infer(
         data,
-        model_bw=models["patcher_bw"].model,
-        model_bw_normal=models["patcher_bw_normal"].model,
-        model_joints=models["patcher_joints"].model,
-        model_pose=models["patcher_pose"].model,
+        patcher_bw=models["patcher_bw"],
+        patcher_bw_normal=models["patcher_bw_normal"],
+        patcher_joints=models["patcher_joints"],
+        patcher_pose=models["patcher_pose"],
         device=device,
         dtype=dtype,
         use_normal=use_normal,

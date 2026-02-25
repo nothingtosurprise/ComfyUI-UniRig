@@ -62,7 +62,7 @@ class FourierEmbedder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.num_freqs > 0:
-            embed = (x[..., None].contiguous() * self.frequencies).view(*x.shape[:-1], -1)
+            embed = (x[..., None].contiguous() * self.frequencies.to(device=x.device, dtype=x.dtype)).view(*x.shape[:-1], -1)
             if self.include_input:
                 return torch.cat((x, embed.sin(), embed.cos()), dim=-1)
             else:
@@ -345,7 +345,7 @@ class CrossAttentionEncoder(nn.Module):
             if feats is not None:
                 data = torch.cat([data, feats], dim=-1)
             data = self.input_proj(data)
-            query = repeat(self.query, "m c -> b m c", b=bs)
+            query = repeat(self.query.to(device=pc.device, dtype=pc.dtype), "m c -> b m c", b=bs)
             latents = self.cross_attn(query, data)
             latents = self.self_attn(latents)
             if self.ln_post is not None:

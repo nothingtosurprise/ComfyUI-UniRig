@@ -491,6 +491,7 @@ def predict_skinning(
 
     # Run prediction
     model = patcher.model
+    model.to(device)
     result = model.predict_step(batch)
 
     # Extract skin weights - result is a list of tensors, one per batch
