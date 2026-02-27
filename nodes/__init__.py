@@ -48,11 +48,11 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "UniRigLoadMesh": "UniRig: Load Mesh",
     "UniRigSaveMesh": "UniRig: Save Mesh",
-    "UniRigLoadModel": "UniRig: Load Model",
+    "UniRigLoadModel": "UniRig: (Down)Load Model",
     "UniRigAutoRig": "UniRig: Auto Rig",
     "UniRigExtractSkeletonNew": "UniRig: Extract Skeleton",
     "UniRigApplySkinningMLNew": "UniRig: Apply Skinning ML",
-    "MIALoadModel": "MIA: Load Model",
+    "MIALoadModel": "MIA: (Down)Load Model",
     "MIAAutoRig": "MIA: Auto Rig",
     "UniRigApplyAnimation": "UniRig: Apply Animation",
     "UniRigLoadRiggedMesh": "UniRig: Load Rigged Mesh",

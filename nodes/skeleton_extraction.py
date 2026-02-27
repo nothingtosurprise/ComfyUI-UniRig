@@ -13,6 +13,10 @@ from trimesh import Trimesh
 import time
 import folder_paths
 import logging
+import comfy.model_management
+import comfy.utils
+
+from comfy_api.latest import io
 
 log = logging.getLogger("unirig")
 TARGET_FACE_COUNT = 50000  # default for mesh decimation
@@ -210,7 +214,7 @@ def _get_direct_preprocess():
 
 
 
-class UniRigExtractSkeletonNew:
+class UniRigExtractSkeletonNew(io.ComfyNode):
     """
     Extract skeleton from mesh using UniRig (SIGGRAPH 2025).
 
@@ -222,41 +226,42 @@ class UniRigExtractSkeletonNew:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "trimesh": ("TRIMESH",),
-                "skeleton_model": ("UNIRIG_SKELETON_MODEL", {
-                    "tooltip": "Pre-loaded skeleton model (from UniRigLoadSkeletonModel) - REQUIRED"
-                }),
-                "seed": ("INT", {"default": 42, "min": 0, "max": 4294967295,
-                               "tooltip": "Random seed for skeleton generation variation"}),
-            },
-            "optional": {
-                "skeleton_template": (["vroid", "mixamo", "smpl", "articulationxl"], {
-                    "default": "mixamo",
-                    "tooltip": "Skeleton template: vroid (52 bones), mixamo (Mixamo-compatible 52 bones), smpl (22 joints, SMPL-compatible for direct motion application), articulationxl (generic/flexible)"
-                }),
-                "target_face_count": ("INT", {
-                    "default": 50000,
-                    "min": 10000,
-                    "max": 500000,
-                    "step": 10000,
-                    "tooltip": "Target face count for mesh decimation. Higher = preserve more detail, slower. Default: 50000"
-                }),
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigExtractSkeletonNew",
+            display_name="UniRig: Extract Skeleton",
+            category="UniRig",
+            description="Extract skeleton from mesh using UniRig (SIGGRAPH 2025). Uses ML-based approach for high-quality semantic skeleton extraction. Works on any mesh type.",
+            inputs=[
+                io.Custom("TRIMESH").Input("trimesh"),
+                io.Custom("UNIRIG_SKELETON_MODEL").Input("skeleton_model",
+                    tooltip="Pre-loaded skeleton model (from UniRigLoadSkeletonModel) - REQUIRED"),
+                io.Int.Input("seed", default=42, min=0, max=4294967295,
+                             tooltip="Random seed for skeleton generation variation"),
+                io.Combo.Input("skeleton_template",
+                               options=["vroid", "mixamo", "smpl", "articulationxl"],
+                               default="mixamo", optional=True,
+                               tooltip="Skeleton template: vroid (52 bones), mixamo (Mixamo-compatible 52 bones), smpl (22 joints, SMPL-compatible for direct motion application), articulationxl (generic/flexible)"),
+                io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
+                             optional=True,
+                             tooltip="Target face count for mesh decimation. Higher = preserve more detail, slower. Default: 50000"),
+            ],
+            outputs=[
+                io.Custom("TRIMESH").Output(display_name="normalized_mesh"),
+                io.Custom("SKELETON").Output(display_name="skeleton"),
+                io.Image.Output(display_name="texture_preview"),
+            ],
+        )
 
-    RETURN_TYPES = ("TRIMESH", "SKELETON", "IMAGE")
-    RETURN_NAMES = ("normalized_mesh", "skeleton", "texture_preview")
-    FUNCTION = "extract"
-    CATEGORY = "UniRig"
-
-    def extract(self, trimesh, skeleton_model, seed, skeleton_template="mixamo", target_face_count=None):
+    @classmethod
+    def execute(cls, trimesh, skeleton_model, seed, skeleton_template="mixamo", target_face_count=None):
         """Extract skeleton using UniRig with cached model only."""
         total_start = time.time()
         log.info("Starting skeleton extraction (cached model only)...")
         log.info("Skeleton template: %s", skeleton_template)
+
+        # Progress bar for major pipeline steps (preprocess, inference, post-process)
+        pbar = comfy.utils.ProgressBar(3)
 
         # Store original template choice before any remapping
         original_template = skeleton_template
@@ -339,6 +344,10 @@ class UniRigExtractSkeletonNew:
 
             preprocess_time = time.time() - step_start
             log.info("[OK] Mesh preprocessed in %.2fs: %s", preprocess_time, npz_path)
+            pbar.update(1)
+
+            # Check for interruption before inference
+            comfy.model_management.throw_exception_if_processing_interrupted()
 
             # Step 2: Run skeleton inference
             step_start = time.time()
@@ -406,6 +415,10 @@ class UniRigExtractSkeletonNew:
             num_joints = len(direct_skeleton_result['joints'])
             log.info("[OK] Inference completed in %.2fs", inference_time)
             log.info("Generated %s joints", num_joints)
+            pbar.update(1)
+
+            # Check for interruption before post-processing
+            comfy.model_management.throw_exception_if_processing_interrupted()
 
             # Step 3: Process results
             step_start = time.time()
@@ -562,6 +575,7 @@ class UniRigExtractSkeletonNew:
                 # Compute tails
                 tails = np.zeros((num_bones, 3))
                 for i in range(num_bones):
+                    comfy.model_management.throw_exception_if_processing_interrupted()
                     children = [j for j, p in enumerate(parents_list) if p == i]
                     if children:
                         tails[i] = np.mean([bone_joints[c] for c in children], axis=0)
@@ -581,6 +595,7 @@ class UniRigExtractSkeletonNew:
 
                 tails = np.zeros_like(bone_joints)
                 for i in range(num_bones):
+                    comfy.model_management.throw_exception_if_processing_interrupted()
                     children = [j for j, p in enumerate(parents_list) if p == i]
                     if children:
                         tails[i] = np.mean([bone_joints[c] for c in children], axis=0)
@@ -617,6 +632,7 @@ class UniRigExtractSkeletonNew:
                 missing_joints = []
 
                 for smpl_name in SMPL_JOINT_NAMES:
+                    comfy.model_management.throw_exception_if_processing_interrupted()
                     # Find corresponding VRoid bone name
                     vroid_name = None
                     for vn, sn in VROID_TO_SMPL_BONE_MAP.items():
@@ -646,6 +662,7 @@ class UniRigExtractSkeletonNew:
                 tails = np.zeros((num_smpl_joints, 3))
 
                 for i, joint_name in enumerate(SMPL_JOINT_NAMES):
+                    comfy.model_management.throw_exception_if_processing_interrupted()
                     # Get canonical bone direction
                     direction = np.array(SMPL_BONE_DIRECTIONS.get(joint_name, [0, 1, 0]))
 
@@ -864,7 +881,9 @@ class UniRigExtractSkeletonNew:
                 log.info("No texture available for preview")
                 texture_preview = create_placeholder_texture()
 
+            pbar.update(1)
+
             total_time = time.time() - total_start
             log.info("Skeleton extraction complete!")
             log.info("TOTAL TIME: %.2fs", total_time)
-            return (normalized_mesh, skeleton, texture_preview)
+            return io.NodeOutput(normalized_mesh, skeleton, texture_preview)

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 import logging
 import comfy.model_management
+import comfy.utils
 
 log = logging.getLogger("unirig")
 # Type hints only - not imported at runtime
@@ -90,6 +91,7 @@ def ensure_mia_models() -> bool:
         MIA_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         for model_file in missing:
+            comfy.model_management.throw_exception_if_processing_interrupted()
             log.info("Downloading %s...", model_file)
             target_path = MIA_MODELS_DIR / model_file
             with tempfile.TemporaryDirectory(dir=str(MIA_MODELS_DIR)) as tmp_dir:
@@ -262,6 +264,9 @@ def run_mia_inference(
     log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s", no_fingers, use_normal, reset_to_rest)
     log.info("Input mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
 
+    # Progress bar for the 4-step MIA inference pipeline + export
+    pbar = comfy.utils.ProgressBar(5)
+
     # Prepare input
     log.info("Step 1/4: Preparing input (N=%d)...", N)
     data = prepare_input(
@@ -271,6 +276,10 @@ def run_mia_inference(
         geo_resample_ratio=models["geo_resample_ratio"],
         get_normals=use_normal,
     )
+    pbar.update(1)
+
+    # Check for interruption before preprocessing
+    comfy.model_management.throw_exception_if_processing_interrupted()
 
     # Preprocess (normalize, coarse joint localization)
     log.info("Step 2/4: Preprocessing (model_coarse, dtype=%s)...", dtype)
@@ -283,6 +292,10 @@ def run_mia_inference(
         geo_resample_ratio=models["geo_resample_ratio"],
         N=N,
     )
+    pbar.update(1)
+
+    # Check for interruption before main inference
+    comfy.model_management.throw_exception_if_processing_interrupted()
 
     # Run main inference (models loaded to GPU individually inside infer())
     log.info("Step 3/4: Running inference (model_bw, model_joints, model_pose, dtype=%s)...", dtype)
@@ -296,6 +309,10 @@ def run_mia_inference(
         dtype=dtype,
         use_normal=use_normal,
     )
+    pbar.update(1)
+
+    # Check for interruption before post-processing
+    comfy.model_management.throw_exception_if_processing_interrupted()
 
     # Post-process blend weights
     log.info("Step 4/4: Post-processing blend weights...")
@@ -334,10 +351,16 @@ def run_mia_inference(
         "pose_ignore_list": [],
     }
 
+    pbar.update(1)
+
+    # Check for interruption before FBX export
+    comfy.model_management.throw_exception_if_processing_interrupted()
+
     # Export to FBX using MIA's Blender integration
     log.info("Exporting to FBX...")
     _export_mia_fbx(output_data, output_path, no_fingers, reset_to_rest)
 
+    pbar.update(1)
     log.info("Inference complete: %s", output_path)
     return output_path
 
@@ -524,6 +547,7 @@ def _export_mia_fbx_direct(
         weights_list = np.split(bw, np.cumsum(vertices_num)[:-1])
 
         for mesh_obj, mesh_bw in zip(input_meshes, weights_list):
+            comfy.model_management.throw_exception_if_processing_interrupted()
             mesh_data = mesh_obj.data
             mesh_obj.vertex_groups.clear()
             for bone_name, bone_index in bones_idx_dict.items():
@@ -644,6 +668,7 @@ def _apply_pose_to_rest_inline(armature_obj, pose, bones_idx_dict, parent_indice
     # Propagate through kinematic chain
     posed_joints = joints.copy()
     for i in range(1, K):
+        comfy.model_management.throw_exception_if_processing_interrupted()
         parent_idx = parent_indices[i]
         parent_matrix = pose_global[parent_idx]
         posed_joints[i] = parent_matrix[:3, :3] @ joints[i] + parent_matrix[:3, 3]

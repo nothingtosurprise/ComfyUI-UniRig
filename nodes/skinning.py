@@ -13,6 +13,10 @@ import shutil
 import numpy as np
 import time
 import folder_paths
+import comfy.model_management
+import comfy.utils
+
+from comfy_api.latest import io
 
 log = logging.getLogger("unirig")
 
@@ -55,7 +59,7 @@ def _get_direct_inference():
     return _direct_inference_module
 
 
-class UniRigApplySkinningMLNew:
+class UniRigApplySkinningMLNew(io.ComfyNode):
     """
     Apply skinning weights using ML.
 
@@ -66,60 +70,46 @@ class UniRigApplySkinningMLNew:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "normalized_mesh": ("TRIMESH",),
-                "skeleton": ("SKELETON",),
-                "skinning_model": ("UNIRIG_SKINNING_MODEL", {
-                    "tooltip": "Pre-loaded skinning model (from UniRigLoadSkinningModel) - REQUIRED"
-                }),
-            },
-            "optional": {
-                "fbx_name": ("STRING", {
-                    "default": "",
-                    "tooltip": "Custom filename for saved FBX (without extension). If empty, uses rigged_<timestamp>.fbx"
-                }),
-                "voxel_grid_size": ("INT", {
-                    "default": 196,
-                    "min": 64,
-                    "max": 512,
-                    "step": 64,
-                    "tooltip": "Voxel grid resolution for spatial weight distribution. Higher = better quality, more VRAM. Default: 196 (model trained with this)"
-                }),
-                "num_samples": ("INT", {
-                    "default": 32768,
-                    "min": 8192,
-                    "max": 131072,
-                    "step": 8192,
-                    "tooltip": "Number of surface samples for weight calculation. Higher = more accurate, slower. Default: 32768"
-                }),
-                "vertex_samples": ("INT", {
-                    "default": 8192,
-                    "min": 2048,
-                    "max": 32768,
-                    "step": 2048,
-                    "tooltip": "Number of vertex samples. Higher = more accurate vertex processing. Default: 8192"
-                }),
-                "voxel_mask_power": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.1,
-                    "max": 5.0,
-                    "step": 0.1,
-                    "tooltip": "Power for voxel mask weight sharpness (alpha). Lower = smoother transitions. Default: 0.5 (model trained with this)"
-                }),
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigApplySkinningMLNew",
+            display_name="UniRig: Apply Skinning ML",
+            category="UniRig",
+            description="Apply skinning weights using ML. Takes skeleton dict and mesh, prepares data and runs ML inference.",
+            inputs=[
+                io.Custom("TRIMESH").Input("normalized_mesh"),
+                io.Custom("SKELETON").Input("skeleton"),
+                io.Custom("UNIRIG_SKINNING_MODEL").Input("skinning_model",
+                    tooltip="Pre-loaded skinning model (from UniRigLoadSkinningModel) - REQUIRED"),
+                io.String.Input("fbx_name", default="", optional=True,
+                                tooltip="Custom filename for saved FBX (without extension). If empty, uses rigged_<timestamp>.fbx"),
+                io.Int.Input("voxel_grid_size", default=196, min=64, max=512, step=64,
+                             optional=True,
+                             tooltip="Voxel grid resolution for spatial weight distribution. Higher = better quality, more VRAM. Default: 196 (model trained with this)"),
+                io.Int.Input("num_samples", default=32768, min=8192, max=131072, step=8192,
+                             optional=True,
+                             tooltip="Number of surface samples for weight calculation. Higher = more accurate, slower. Default: 32768"),
+                io.Int.Input("vertex_samples", default=8192, min=2048, max=32768, step=2048,
+                             optional=True,
+                             tooltip="Number of vertex samples. Higher = more accurate vertex processing. Default: 8192"),
+                io.Float.Input("voxel_mask_power", default=0.5, min=0.1, max=5.0, step=0.1,
+                               optional=True,
+                               tooltip="Power for voxel mask weight sharpness (alpha). Lower = smoother transitions. Default: 0.5 (model trained with this)"),
+            ],
+            outputs=[
+                io.String.Output(display_name="fbx_output_path"),
+                io.Image.Output(display_name="texture_preview"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING", "IMAGE")
-    RETURN_NAMES = ("fbx_output_path", "texture_preview")
-    FUNCTION = "apply_skinning"
-    CATEGORY = "UniRig"
-
-    def apply_skinning(self, normalized_mesh, skeleton, skinning_model,
-                       fbx_name=None, voxel_grid_size=None, num_samples=None, vertex_samples=None,
-                       voxel_mask_power=None):
+    @classmethod
+    def execute(cls, normalized_mesh, skeleton, skinning_model,
+                fbx_name=None, voxel_grid_size=None, num_samples=None, vertex_samples=None,
+                voxel_mask_power=None):
         log.info(f"Starting ML skinning (cached model only)...")
+
+        # Progress bar for major pipeline steps (data prep, inference, FBX export)
+        pbar = comfy.utils.ProgressBar(3)
 
         # Validate model is provided
         if skinning_model is None:
@@ -151,6 +141,9 @@ class UniRigApplySkinningMLNew:
             'parents': skeleton['parents'],
             'tails': skeleton['tails'],
         }
+
+        # Check for interruption before data preparation
+        comfy.model_management.throw_exception_if_processing_interrupted()
 
         # Add mesh data
         mesh_data_mapping = {
@@ -202,6 +195,11 @@ class UniRigApplySkinningMLNew:
 
         normalized_mesh.export(input_glb)
         log.info(f"Exported mesh: {normalized_mesh.vertices.shape[0]} vertices, {normalized_mesh.faces.shape[0]} faces")
+
+        pbar.update(1)
+
+        # Check for interruption before inference
+        comfy.model_management.throw_exception_if_processing_interrupted()
 
         # Run skinning inference
         step_start = time.time()
@@ -290,6 +288,11 @@ class UniRigApplySkinningMLNew:
         log.info(f"[OK] Direct inference completed in {inference_time:.2f}s")
         log.info(f"Skin weights shape: {skin_weights.shape}")
 
+        pbar.update(1)
+
+        # Check for interruption before FBX export
+        comfy.model_management.throw_exception_if_processing_interrupted()
+
         # Generate FBX output using direct bpy export
         log.info(f"Generating FBX...")
 
@@ -360,6 +363,7 @@ class UniRigApplySkinningMLNew:
             log.info(f"No texture available for preview")
             texture_preview = create_placeholder_texture()
 
+        pbar.update(1)
         log.info(f"Skinning application complete!")
 
         # Clean up temporary directory
@@ -383,4 +387,4 @@ class UniRigApplySkinningMLNew:
         if sys.platform == 'win32' and os.path.exists(temp_dir):
             log.info(f"Temp directory will be cleaned on next restart: {temp_dir}")
 
-        return (output_filename, texture_preview)
+        return io.NodeOutput(output_filename, texture_preview)

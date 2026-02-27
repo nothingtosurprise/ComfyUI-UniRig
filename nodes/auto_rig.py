@@ -7,6 +7,10 @@ import logging
 import os
 import sys
 import time
+import comfy.model_management
+import comfy.utils
+
+from comfy_api.latest import io
 
 log = logging.getLogger("unirig")
 
@@ -19,7 +23,7 @@ except ImportError:
     from skinning import UniRigApplySkinningMLNew
 
 
-class UniRigAutoRig:
+class UniRigAutoRig(io.ComfyNode):
     """
     Single node for complete rigging pipeline.
 
@@ -32,40 +36,33 @@ class UniRigAutoRig:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "trimesh": ("TRIMESH",),
-                "model": ("UNIRIG_MODEL", {
-                    "tooltip": "Pre-loaded UniRig model (from UniRigLoadModel)"
-                }),
-            },
-            "optional": {
-                "skeleton_template": (["mixamo", "articulationxl"], {
-                    "default": "mixamo",
-                    "tooltip": "Skeleton template. 'mixamo' remaps to Mixamo bone names (humanoids). 'articulationxl' outputs native skeleton (any 3D asset)."
-                }),
-                "fbx_name": ("STRING", {
-                    "default": "",
-                    "tooltip": "Custom filename for saved FBX (without extension). If empty, uses auto-generated name."
-                }),
-                "target_face_count": ("INT", {
-                    "default": 50000,
-                    "min": 10000,
-                    "max": 500000,
-                    "step": 10000,
-                    "tooltip": "Target face count for mesh decimation. Warning: changing from default may reduce quality."
-                }),
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigAutoRig",
+            display_name="UniRig: Auto Rig",
+            category="UniRig",
+            description="Single node for complete rigging pipeline. Combines skeleton extraction + skinning + normalization into one step. Takes mesh, outputs animation-ready FBX.",
+            inputs=[
+                io.Custom("TRIMESH").Input("trimesh"),
+                io.Custom("UNIRIG_MODEL").Input("model",
+                    tooltip="Pre-loaded UniRig model (from UniRigLoadModel)"),
+                io.Combo.Input("skeleton_template", options=["mixamo", "articulationxl"],
+                               default="mixamo", optional=True,
+                               tooltip="Skeleton template. 'mixamo' remaps to Mixamo bone names (humanoids). 'articulationxl' outputs native skeleton (any 3D asset)."),
+                io.String.Input("fbx_name", default="", optional=True,
+                                tooltip="Custom filename for saved FBX (without extension). If empty, uses auto-generated name."),
+                io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
+                             optional=True,
+                             tooltip="Target face count for mesh decimation. Warning: changing from default may reduce quality."),
+            ],
+            outputs=[
+                io.String.Output(display_name="fbx_output_path"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("fbx_output_path",)
-    FUNCTION = "auto_rig"
-    CATEGORY = "UniRig"
-
-    def auto_rig(self, trimesh, model,
-                 skeleton_template="mixamo", fbx_name="", target_face_count=50000):
+    @classmethod
+    def execute(cls, trimesh, model,
+                skeleton_template="mixamo", fbx_name="", target_face_count=50000):
         """
         Complete rigging pipeline in one step.
 
@@ -77,6 +74,9 @@ class UniRigAutoRig:
         total_start = time.time()
         log.info("Starting complete rigging pipeline...")
         log.info("Skeleton template: %s", skeleton_template)
+
+        # Progress bar for the 2-step pipeline (skeleton extraction + skinning)
+        pbar = comfy.utils.ProgressBar(2)
 
         # Extract individual models from combined model
         skeleton_model = model["skeleton_model"]
@@ -93,8 +93,7 @@ class UniRigAutoRig:
         log.info("Step 1/2: Extracting skeleton...")
         step_start = time.time()
 
-        skeleton_extractor = UniRigExtractSkeletonNew()
-        normalized_mesh, skeleton, texture_preview = skeleton_extractor.extract(
+        normalized_mesh, skeleton, texture_preview = UniRigExtractSkeletonNew.execute(
             trimesh=trimesh,
             skeleton_model=skeleton_model,
             seed=42,  # Fixed seed for reproducibility
@@ -105,13 +104,16 @@ class UniRigAutoRig:
         skeleton_time = time.time() - step_start
         log.info("Skeleton extraction complete in %.2fs", skeleton_time)
         log.info("Extracted %d bones", len(skeleton.get('names', [])))
+        pbar.update(1)
+
+        # Check for interruption before skinning
+        comfy.model_management.throw_exception_if_processing_interrupted()
 
         # Step 2: Apply skinning
         log.info("Step 2/2: Applying skinning...")
         step_start = time.time()
 
-        skinning_applier = UniRigApplySkinningMLNew()
-        fbx_output_path, _ = skinning_applier.apply_skinning(
+        fbx_output_path, _ = UniRigApplySkinningMLNew.execute(
             normalized_mesh=normalized_mesh,
             skeleton=skeleton,
             skinning_model=skinning_model,
@@ -124,6 +126,7 @@ class UniRigAutoRig:
 
         skinning_time = time.time() - step_start
         log.info("Skinning complete in %.2fs", skinning_time)
+        pbar.update(1)
 
         total_time = time.time() - total_start
         log.info("========================================")
@@ -132,4 +135,4 @@ class UniRigAutoRig:
         log.info("Output: %s", fbx_output_path)
         log.info("========================================")
 
-        return (fbx_output_path,)
+        return io.NodeOutput(fbx_output_path)

@@ -36,6 +36,7 @@ LIB_DIR = NODES_DIR
 UNIRIG_MODELS_DIR = Path(folder_paths.models_dir) / "unirig"
 UNIRIG_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 os.environ['UNIRIG_MODELS_DIR'] = str(UNIRIG_MODELS_DIR)
+folder_paths.add_model_folder_path("unirig", str(UNIRIG_MODELS_DIR))
 
 log.info("Models directory: %s", UNIRIG_MODELS_DIR)
 

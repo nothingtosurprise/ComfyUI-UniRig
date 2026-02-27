@@ -130,11 +130,43 @@ def _resolve_dtype(dtype):
     return dtype
 
 
+def _fix_leftover_meta_tensors(model):
+    """Replace any leftover meta-device parameters/buffers with real CPU tensors.
+
+    After constructing a model on torch.device('meta') and loading weights with
+    assign=True, registered buffers that are not present in the state_dict remain
+    on the meta device.  This helper materialises them on CPU so the model is
+    fully usable.
+    """
+    # Fix meta buffers (e.g. FrequencyPositionalEmbedding.frequencies)
+    for name, buf in list(model.named_buffers()):
+        if buf.device.type == "meta":
+            parts = name.split(".")
+            parent = model
+            for p in parts[:-1]:
+                parent = getattr(parent, p)
+            parent._buffers[parts[-1]] = torch.zeros_like(buf, device="cpu")
+
+    # Fix meta parameters (shouldn't happen if state_dict is complete, but be safe)
+    for name, param in list(model.named_parameters()):
+        if param.device.type == "meta":
+            parts = name.split(".")
+            parent = model
+            for p in parts[:-1]:
+                parent = getattr(parent, p)
+            parent._parameters[parts[-1]] = torch.nn.Parameter(
+                torch.zeros_like(param, device="cpu"),
+                requires_grad=param.requires_grad,
+            )
+
+
 def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto"):
     """
     Load the skeleton (AR) model directly.
 
-    Uses comfy.ops.pick_operations for dtype-aware layer initialization.
+    Uses meta-device initialization to avoid 2x RAM during model construction:
+    the model is first built on torch.device('meta') (zero memory), then real
+    weights are loaded from disk and assigned in-place.
 
     Args:
         checkpoint_path: Path to skeleton.safetensors
@@ -172,15 +204,17 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     # Build tokenizer from inlined config
     tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=TOKENIZER_CONFIG))
 
-    # Build model with dtype/device/operations injected
+    # Build model on meta device (zero RAM) to avoid 2x memory during construction
+    log.info("Building skeleton model on meta device (zero RAM allocation)...")
     model_config = dict(AR_MODEL_CONFIG)
     model_config['tokenizer'] = tokenizer
     model_config['dtype'] = model_dtype
-    model_config['device'] = 'cpu'
+    model_config['device'] = 'meta'
     model_config['operations'] = operations
-    model = get_model(**model_config)
+    with torch.device("meta"):
+        model = get_model(**model_config)
 
-    # Load weights with comfy.utils (safe, memory-efficient)
+    # Load weights with comfy.utils (safe, memory-efficient) and assign directly
     log.info("Loading skeleton weights from %s", checkpoint_path)
     state_dict = comfy.utils.load_torch_file(checkpoint_path)
 
@@ -190,7 +224,12 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
         new_key = k[6:] if k.startswith('model.') else k
         cleaned_state_dict[new_key] = v
 
-    model.load_state_dict(cleaned_state_dict, strict=False)
+    # assign=True: directly replace meta tensors with loaded tensors (no copy)
+    model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+
+    # Fix any leftover meta-device buffers not present in state_dict
+    _fix_leftover_meta_tensors(model)
+
     model.eval()
 
     # Safety net: ensure all weights match requested dtype
@@ -206,7 +245,9 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
     """
     Load the skinning model directly.
 
-    Uses comfy.ops.pick_operations for dtype-aware layer initialization.
+    Uses meta-device initialization to avoid 2x RAM during model construction:
+    the model is first built on torch.device('meta') (zero memory), then real
+    weights are loaded from disk and assigned in-place.
 
     Args:
         checkpoint_path: Path to skin.safetensors
@@ -229,14 +270,16 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         operations = comfy.ops.disable_weight_init
     log.info("Skin ops: %s (dtype=%s)", operations, model_dtype)
 
-    # Build model with dtype/device/operations injected
+    # Build model on meta device (zero RAM) to avoid 2x memory during construction
+    log.info("Building skin model on meta device (zero RAM allocation)...")
     model_config = dict(SKIN_MODEL_CONFIG)
     model_config['dtype'] = model_dtype
-    model_config['device'] = 'cpu'
+    model_config['device'] = 'meta'
     model_config['operations'] = operations
-    model = get_model(tokenizer=None, **model_config)
+    with torch.device("meta"):
+        model = get_model(tokenizer=None, **model_config)
 
-    # Load weights with comfy.utils (safe, memory-efficient)
+    # Load weights with comfy.utils (safe, memory-efficient) and assign directly
     log.info("Loading skin weights from %s", checkpoint_path)
     state_dict = comfy.utils.load_torch_file(checkpoint_path)
 
@@ -246,7 +289,12 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         new_key = k[6:] if k.startswith('model.') else k
         cleaned_state_dict[new_key] = v
 
-    model.load_state_dict(cleaned_state_dict, strict=False)
+    # assign=True: directly replace meta tensors with loaded tensors (no copy)
+    model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+
+    # Fix any leftover meta-device buffers not present in state_dict
+    _fix_leftover_meta_tensors(model)
+
     model.eval()
 
     # Safety net: ensure all weights match requested dtype
