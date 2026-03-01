@@ -13,6 +13,7 @@ trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
 comfy-sparse-attn = "*"
+av = "*"
 
 # ML libs
 transformers = "==4.51.3"
