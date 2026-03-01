@@ -95,6 +95,8 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
                 io.Float.Input("voxel_mask_power", default=0.5, min=0.1, max=5.0, step=0.1,
                                optional=True,
                                tooltip="Power for voxel mask weight sharpness (alpha). Lower = smoother transitions. Default: 0.5 (model trained with this)"),
+                io.Boolean.Input("debug", default=False, optional=True,
+                                 tooltip="Enable detailed debug logging for skinning."),
             ],
             outputs=[
                 io.String.Output(display_name="fbx_output_path"),
@@ -105,8 +107,16 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
     @classmethod
     def execute(cls, normalized_mesh, skeleton, skinning_model,
                 fbx_name=None, voxel_grid_size=None, num_samples=None, vertex_samples=None,
-                voxel_mask_power=None):
+                voxel_mask_power=None, debug=False):
+        if debug:
+            logging.getLogger("unirig").setLevel(logging.DEBUG)
+
         log.info(f"Starting ML skinning (cached model only)...")
+        log.debug("Skeleton joint count: %d", len(skeleton.get('joints', [])))
+        log.debug("Skeleton bone names: %s", skeleton.get('names', []))
+        log.debug("Skeleton parents: %s", skeleton.get('parents', []))
+        log.debug("Normalized mesh: %d vertices, %d faces", len(normalized_mesh.vertices), len(normalized_mesh.faces))
+        log.debug("Skinning model keys: %s", list(skinning_model.keys()) if skinning_model else None)
 
         # Progress bar for major pipeline steps (data prep, inference, FBX export)
         pbar = comfy.utils.ProgressBar(3)
@@ -216,6 +226,7 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
         if voxel_mask_power is not None:
             config_overrides['voxel_mask_power'] = voxel_mask_power
 
+        log.debug("Config overrides: %s", config_overrides)
         if config_overrides:
             log.info(f"Config overrides: {config_overrides}")
 
@@ -287,6 +298,8 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
         inference_time = time.time() - step_start
         log.info(f"[OK] Direct inference completed in {inference_time:.2f}s")
         log.info(f"Skin weights shape: {skin_weights.shape}")
+        log.debug("Skin weights range: min=%.6f, max=%.6f, mean=%.6f", skin_weights.min(), skin_weights.max(), skin_weights.mean())
+        log.debug("Skin weights nonzero: %d / %d (%.1f%%)", np.count_nonzero(skin_weights), skin_weights.size, 100 * np.count_nonzero(skin_weights) / skin_weights.size)
 
         pbar.update(1)
 

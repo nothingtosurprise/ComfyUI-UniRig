@@ -823,7 +823,7 @@ class PointTransformerV3Object(PointModule):
 
         # encoder
         enc_drop_path = [
-            x.item() for x in torch.linspace(0, drop_path, sum(enc_depths))
+            x.item() for x in torch.linspace(0, drop_path, sum(enc_depths), device="cpu")
         ]
         self.enc = PointSequential()
         for s in range(self.num_stages):

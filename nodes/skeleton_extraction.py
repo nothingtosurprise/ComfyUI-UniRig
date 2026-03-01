@@ -245,6 +245,8 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
                 io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
                              optional=True,
                              tooltip="Target face count for mesh decimation. Higher = preserve more detail, slower. Default: 50000"),
+                io.Boolean.Input("debug", default=False, optional=True,
+                                 tooltip="Enable detailed debug logging for skeleton extraction."),
             ],
             outputs=[
                 io.Custom("TRIMESH").Output(display_name="normalized_mesh"),
@@ -254,11 +256,19 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, trimesh, skeleton_model, seed, skeleton_template="mixamo", target_face_count=None):
+    def execute(cls, trimesh, skeleton_model, seed, skeleton_template="mixamo", target_face_count=None,
+                debug=False):
         """Extract skeleton using UniRig with cached model only."""
+        if debug:
+            logging.getLogger("unirig").setLevel(logging.DEBUG)
+
         total_start = time.time()
         log.info("Starting skeleton extraction (cached model only)...")
         log.info("Skeleton template: %s", skeleton_template)
+        log.debug("Input mesh: %d vertices, %d faces", len(trimesh.vertices), len(trimesh.faces))
+        log.debug("Input mesh bounds: min=%s, max=%s", trimesh.vertices.min(axis=0), trimesh.vertices.max(axis=0))
+        log.debug("Skeleton model keys: %s", list(skeleton_model.keys()) if skeleton_model else None)
+        log.debug("Seed: %d", seed)
 
         # Progress bar for major pipeline steps (preprocess, inference, post-process)
         pbar = comfy.utils.ProgressBar(3)
@@ -344,6 +354,13 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
 
             preprocess_time = time.time() - step_start
             log.info("[OK] Mesh preprocessed in %.2fs: %s", preprocess_time, npz_path)
+
+            # Debug: log preprocessed mesh stats
+            _dbg_data = np.load(npz_path)
+            log.debug("Preprocessed mesh: %d vertices, %d faces", len(_dbg_data['vertices']), len(_dbg_data['faces']))
+            log.debug("Preprocessed NPZ keys: %s", list(_dbg_data.keys()))
+            _dbg_data.close()
+
             pbar.update(1)
 
             # Check for interruption before inference
@@ -393,6 +410,8 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
             # Extract dtype and attn_backend from model config (set by UniRigLoadModel)
             model_dtype = skeleton_model.get("dtype")
             model_attn_backend = skeleton_model.get("attn_backend", "auto")
+            log.debug("Model dtype: %s, attn_backend: %s", model_dtype, model_attn_backend)
+            log.debug("Generation params: cls=%s, max_new_tokens=2048, num_samples=2048, seed=%d", cls_value, seed)
 
             # Run direct skeleton prediction
             direct_skeleton_result, norm_params = direct_module.predict_skeleton_from_mesh(
@@ -415,6 +434,11 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
             num_joints = len(direct_skeleton_result['joints'])
             log.info("[OK] Inference completed in %.2fs", inference_time)
             log.info("Generated %s joints", num_joints)
+            log.debug("Raw result keys: %s", list(direct_skeleton_result.keys()))
+            log.debug("Joints shape: %s", np.array(direct_skeleton_result['joints']).shape)
+            log.debug("Parents: %s", direct_skeleton_result['parents'])
+            log.debug("Names: %s", direct_skeleton_result.get('names'))
+            log.debug("Normalization params: center=%s, scale=%s", norm_params.get('center'), norm_params.get('scale'))
             pbar.update(1)
 
             # Check for interruption before post-processing

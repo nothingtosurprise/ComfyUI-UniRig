@@ -225,18 +225,34 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
         cleaned_state_dict[new_key] = v
 
     # assign=True: directly replace meta tensors with loaded tensors (no copy)
-    model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+    result = model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+    log.debug("Skeleton load_state_dict: missing=%d, unexpected=%d", len(result.missing_keys), len(result.unexpected_keys))
+    if result.missing_keys:
+        log.debug("  Missing keys: %s", result.missing_keys[:20])
+    if result.unexpected_keys:
+        log.debug("  Unexpected keys: %s", result.unexpected_keys[:20])
 
     # Fix any leftover meta-device buffers not present in state_dict
+    meta_count = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers before fix: %d", meta_count)
     _fix_leftover_meta_tensors(model)
+    meta_count_after = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers after fix: %d", meta_count_after)
 
     model.eval()
+
+    # Debug: verify frequency buffers are non-zero
+    for name, buf in model.named_buffers():
+        if "frequencies" in name:
+            log.debug("Buffer %s: shape=%s, device=%s, first_5=%s", name, buf.shape, buf.device, buf[:5].tolist() if buf.numel() >= 5 else buf.tolist())
 
     # Safety net: ensure all weights match requested dtype
     if model_dtype is not None:
         model = model.to(dtype=model_dtype)
         log.info("Skeleton model dtype: %s", model_dtype)
 
+    param_count = sum(p.numel() for p in model.parameters())
+    log.debug("Skeleton model params: %d (%.1f M)", param_count, param_count / 1e6)
     log.info("Skeleton model ready (on CPU, will be moved to GPU by ModelPatcher)")
     return model, tokenizer
 
@@ -290,18 +306,34 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         cleaned_state_dict[new_key] = v
 
     # assign=True: directly replace meta tensors with loaded tensors (no copy)
-    model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+    result = model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+    log.debug("Skin load_state_dict: missing=%d, unexpected=%d", len(result.missing_keys), len(result.unexpected_keys))
+    if result.missing_keys:
+        log.debug("  Missing keys: %s", result.missing_keys[:20])
+    if result.unexpected_keys:
+        log.debug("  Unexpected keys: %s", result.unexpected_keys[:20])
 
     # Fix any leftover meta-device buffers not present in state_dict
+    meta_count = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers before fix: %d", meta_count)
     _fix_leftover_meta_tensors(model)
+    meta_count_after = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers after fix: %d", meta_count_after)
 
     model.eval()
+
+    # Debug: verify frequency buffers are non-zero
+    for name, buf in model.named_buffers():
+        if "frequencies" in name:
+            log.debug("Buffer %s: shape=%s, device=%s, first_5=%s", name, buf.shape, buf.device, buf[:5].tolist() if buf.numel() >= 5 else buf.tolist())
 
     # Safety net: ensure all weights match requested dtype
     if model_dtype is not None:
         model = model.to(dtype=model_dtype)
         log.info("Skin model dtype: %s", model_dtype)
 
+    param_count = sum(p.numel() for p in model.parameters())
+    log.debug("Skin model params: %d (%.1f M)", param_count, param_count / 1e6)
     log.info("Skin model ready (on CPU, will be moved to GPU by ModelPatcher)")
     return model
 
@@ -399,6 +431,8 @@ def predict_skeleton(
 
     # Convert to tensors in the model's dtype
     model_dtype = patcher.model.get_dtype() or torch.float32
+    log.debug("predict_skeleton: vertices=%s, normals=%s, dtype=%s, device=%s, cls=%s",
+              vertices.shape, normals.shape, model_dtype, device, cls)
     vertices_t = torch.from_numpy(vertices).to(dtype=model_dtype, device=device)
     normals_t = torch.from_numpy(normals).to(dtype=model_dtype, device=device)
 
@@ -413,6 +447,7 @@ def predict_skeleton(
         'temperature': 1.5,
     }
     default_kwargs.update(generate_kwargs)
+    log.debug("Generation kwargs: %s", default_kwargs)
 
     # Run generation
     model = patcher.model
@@ -437,6 +472,10 @@ def predict_skeleton(
             if val is not None:
                 output[attr] = np.array(val) if isinstance(val, (list, tuple)) else val
 
+    log.debug("predict_skeleton output: joints=%s, parents=%s, names=%s",
+              output['joints'].shape if output['joints'] is not None else None,
+              output['parents'].shape if output['parents'] is not None else None,
+              output['names'][:5] if output['names'] is not None else None)
     return output
 
 
@@ -483,6 +522,8 @@ def predict_skinning(
 
     num_joints = len(joints)
     num_vertices = len(vertices)
+    log.debug("predict_skinning: vertices=%s, normals=%s, joints=%s, parents=%s, dtype=%s, device=%s",
+              vertices.shape, normals.shape, joints.shape, parents.shape, dtype, device)
 
     # Compute tails if not provided (use joint positions as tails)
     if tails is None:
@@ -519,12 +560,14 @@ def predict_skinning(
         )
         voxel_skin_weights = np.nan_to_num(voxel_skin_weights, nan=0., posinf=0., neginf=0.)
         log.info("voxel_skin shape: %s", voxel_skin_weights.shape)
+        log.debug("voxel_skin range: min=%.6f, max=%.6f, mean=%.6f", voxel_skin_weights.min(), voxel_skin_weights.max(), voxel_skin_weights.mean())
     else:
         # Fallback: zero voxel_skin
         voxel_skin_weights = np.zeros((num_joints, num_vertices), dtype=np.float32)
 
     # Prepare batch in the model's dtype
     model_dtype = patcher.model.get_dtype() or torch.float32
+    log.debug("Skin model dtype: %s", model_dtype)
     batch = {
         'vertices': torch.from_numpy(vertices).to(dtype=model_dtype).unsqueeze(0).to(device),
         'normals': torch.from_numpy(normals).to(dtype=model_dtype).unsqueeze(0).to(device),
@@ -537,6 +580,11 @@ def predict_skinning(
         'path': ['direct_inference'],
     }
 
+    # Debug: log batch tensor shapes
+    for k, v in batch.items():
+        if isinstance(v, torch.Tensor):
+            log.debug("Batch[%s]: shape=%s, dtype=%s, device=%s", k, v.shape, v.dtype, v.device)
+
     # Run prediction
     model = patcher.model
     model.to(device)
@@ -547,6 +595,7 @@ def predict_skinning(
     if isinstance(skin_weights, torch.Tensor):
         skin_weights = skin_weights.cpu().float().numpy()
 
+    log.debug("predict_skinning output: shape=%s, min=%.6f, max=%.6f", skin_weights.shape, skin_weights.min(), skin_weights.max())
     return skin_weights
 
 
@@ -585,6 +634,8 @@ def predict_skeleton_from_mesh(
     """
     # 1. Normalize mesh vertices
     norm_vertices, norm_params = normalize_vertices(vertices)
+    log.debug("Normalized vertices: shape=%s, range=[%.3f, %.3f]", norm_vertices.shape, norm_vertices.min(), norm_vertices.max())
+    log.debug("Normalization: center=%s, scale=%.4f", norm_params['center'], norm_params['scale'])
 
     # 2. Sample surface points
     sampled_points, sampled_normals = sample_mesh_surface(
@@ -593,6 +644,7 @@ def predict_skeleton_from_mesh(
         num_samples=num_samples,
         seed=seed,
     )
+    log.debug("Sampled %d surface points, normals shape=%s", len(sampled_points), sampled_normals.shape)
 
     # 3. Run skeleton prediction
     skeleton = predict_skeleton(

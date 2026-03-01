@@ -7,6 +7,8 @@ import logging
 import os
 import sys
 import time
+
+import numpy as np
 import comfy.model_management
 import comfy.utils
 
@@ -54,6 +56,8 @@ class UniRigAutoRig(io.ComfyNode):
                 io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
                              optional=True,
                              tooltip="Target face count for mesh decimation. Warning: changing from default may reduce quality."),
+                io.Boolean.Input("debug", default=False, optional=True,
+                                 tooltip="Enable detailed debug logging for the entire rigging pipeline."),
             ],
             outputs=[
                 io.String.Output(display_name="fbx_output_path"),
@@ -62,7 +66,8 @@ class UniRigAutoRig(io.ComfyNode):
 
     @classmethod
     def execute(cls, trimesh, model,
-                skeleton_template="mixamo", fbx_name="", target_face_count=50000):
+                skeleton_template="mixamo", fbx_name="", target_face_count=50000,
+                debug=False):
         """
         Complete rigging pipeline in one step.
 
@@ -71,9 +76,14 @@ class UniRigAutoRig(io.ComfyNode):
         3. Normalize for target template (happens in blender_export_fbx.py)
         4. Export FBX
         """
+        if debug:
+            logging.getLogger("unirig").setLevel(logging.DEBUG)
+
         total_start = time.time()
         log.info("Starting complete rigging pipeline...")
         log.info("Skeleton template: %s", skeleton_template)
+        log.debug("Model keys: %s", list(model.keys()))
+        log.debug("Model dtype: %s, attn_backend: %s", model.get("dtype"), model.get("attn_backend"))
 
         # Progress bar for the 2-step pipeline (skeleton extraction + skinning)
         pbar = comfy.utils.ProgressBar(2)
@@ -104,6 +114,10 @@ class UniRigAutoRig(io.ComfyNode):
         skeleton_time = time.time() - step_start
         log.info("Skeleton extraction complete in %.2fs", skeleton_time)
         log.info("Extracted %d bones", len(skeleton.get('names', [])))
+        log.debug("Bone names: %s", skeleton.get('names', []))
+        log.debug("Bone parents: %s", skeleton.get('parents', []))
+        log.debug("Joints shape: %s", np.array(skeleton.get('joints', [])).shape if skeleton.get('joints') is not None else None)
+        log.debug("Edges: %d", len(skeleton.get('edges', [])))
         pbar.update(1)
 
         # Check for interruption before skinning
@@ -126,6 +140,7 @@ class UniRigAutoRig(io.ComfyNode):
 
         skinning_time = time.time() - step_start
         log.info("Skinning complete in %.2fs", skinning_time)
+        log.debug("FBX output: %s", fbx_output_path)
         pbar.update(1)
 
         total_time = time.time() - total_start
