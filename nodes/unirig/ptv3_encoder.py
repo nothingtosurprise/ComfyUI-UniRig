@@ -30,7 +30,7 @@ from einops import rearrange
 
 import comfy.ops
 import comfy.utils
-from comfy.attention_sparse import dispatch_varlen_attention
+from comfy_sparse_attn import dispatch_varlen_attention
 
 from .serialization import encode, decode
 
