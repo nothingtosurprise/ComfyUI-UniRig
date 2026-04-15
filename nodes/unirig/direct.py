@@ -425,13 +425,19 @@ def predict_skeleton(
         checkpoint_path, dtype=dtype, attn_backend=attn_backend
     )
 
-    # Let ComfyUI manage GPU memory
-    comfy.model_management.load_models_gpu([patcher])
+    # Let ComfyUI manage GPU memory — beam search (15 beams × 2048 tokens) needs ~2 GB
+    memory_required = 2 * 1024 * 1024 * 1024
+    comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
     device = patcher.load_device
+
+    if device.type == 'cuda':
+        a = torch.cuda.memory_allocated(device) / (1024**3)
+        r = torch.cuda.memory_reserved(device) / (1024**3)
+        log.debug("[VRAM predict_skeleton] after load_models_gpu: allocated=%.2fGB reserved=%.2fGB", a, r)
 
     # Convert to tensors in the model's dtype
     model_dtype = patcher.model.get_dtype() or torch.float32
-    log.debug("predict_skeleton: vertices=%s, normals=%s, dtype=%s, device=%s, cls=%s",
+    log.debug("[VRAM predict_skeleton] vertices=%s, normals=%s, dtype=%s, device=%s, cls=%s",
               vertices.shape, normals.shape, model_dtype, device, cls)
     vertices_t = torch.from_numpy(vertices).to(dtype=model_dtype, device=device)
     normals_t = torch.from_numpy(normals).to(dtype=model_dtype, device=device)
@@ -450,6 +456,10 @@ def predict_skeleton(
     log.debug("Generation kwargs: %s", default_kwargs)
 
     # Run generation
+    if device.type == 'cuda':
+        a = torch.cuda.memory_allocated(device) / (1024**3)
+        r = torch.cuda.memory_reserved(device) / (1024**3)
+        log.debug("[VRAM predict_skeleton] before generate: allocated=%.2fGB reserved=%.2fGB", a, r)
     model = patcher.model
     result = model.generate(
         vertices=vertices_t,
@@ -457,6 +467,10 @@ def predict_skeleton(
         cls=cls,
         **default_kwargs,
     )
+
+    # Release fragmented CUDA blocks from beam search before skinning runs
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     # Convert result to dict of numpy arrays
     output = {
@@ -516,13 +530,19 @@ def predict_skinning(
         checkpoint_path, dtype=dtype, attn_backend=attn_backend
     )
 
-    # Let ComfyUI manage GPU memory
-    comfy.model_management.load_models_gpu([patcher])
+    # Let ComfyUI manage GPU memory — skinning forward pass needs ~1 GB
+    memory_required = 1 * 1024 * 1024 * 1024
+    comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
     device = patcher.load_device
+
+    if device.type == 'cuda':
+        a = torch.cuda.memory_allocated(device) / (1024**3)
+        r = torch.cuda.memory_reserved(device) / (1024**3)
+        log.debug("[VRAM predict_skinning] after load_models_gpu: allocated=%.2fGB reserved=%.2fGB", a, r)
 
     num_joints = len(joints)
     num_vertices = len(vertices)
-    log.debug("predict_skinning: vertices=%s, normals=%s, joints=%s, parents=%s, dtype=%s, device=%s",
+    log.debug("[VRAM predict_skinning] vertices=%s, normals=%s, joints=%s, parents=%s, dtype=%s, device=%s",
               vertices.shape, normals.shape, joints.shape, parents.shape, dtype, device)
 
     # Compute tails if not provided (use joint positions as tails)

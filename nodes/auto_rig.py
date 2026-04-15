@@ -101,6 +101,12 @@ class UniRigAutoRig(io.ComfyNode):
 
         # Step 1: Extract skeleton
         log.info("Step 1/2: Extracting skeleton...")
+        import torch
+        dev = comfy.model_management.get_torch_device()
+        if dev.type == 'cuda':
+            a = torch.cuda.memory_allocated(dev) / (1024**3)
+            r = torch.cuda.memory_reserved(dev) / (1024**3)
+            log.debug("[VRAM AutoRig] before skeleton extraction: allocated=%.2fGB reserved=%.2fGB", a, r)
         step_start = time.time()
 
         normalized_mesh, skeleton, texture_preview = UniRigExtractSkeletonNew.execute(
@@ -125,6 +131,10 @@ class UniRigAutoRig(io.ComfyNode):
 
         # Step 2: Apply skinning
         log.info("Step 2/2: Applying skinning...")
+        if dev.type == 'cuda':
+            a = torch.cuda.memory_allocated(dev) / (1024**3)
+            r = torch.cuda.memory_reserved(dev) / (1024**3)
+            log.debug("[VRAM AutoRig] before skinning: allocated=%.2fGB reserved=%.2fGB", a, r)
         step_start = time.time()
 
         fbx_output_path, _ = UniRigApplySkinningMLNew.execute(
