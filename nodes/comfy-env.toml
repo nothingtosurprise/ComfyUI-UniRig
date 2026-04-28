@@ -1,21 +1,21 @@
 python = "3.11"  # Required by bpy 4.2
 
+[dependencies]
+mesalib = "*"        # replaces apt: libgl1-mesa-glx
+libglu = "*"         # replaces apt: libglu1-mesa
+c-compiler = "*"     # needed by triton JIT
+
 [cuda]
 packages = ["torch-scatter", "torch-cluster", "flash-attn", "cumm", "spconv"]
 
 [pypi-dependencies]
 # Blender
 bpy = ">=4.2,<4.3"
-
-# Core
 numpy = "<2.0"
 trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
 comfy-sparse-attn = "==0.0.8"
-av = "*"
-
-# ML libs
 transformers = "==4.51.3"
 pytorch_lightning = "*"
 lightning = "*"
@@ -26,8 +26,6 @@ omegaconf = "*"
 huggingface_hub = "*"
 wandb = "*"
 hf_xet = "*"
-
-# Geometry
 fast-simplification = "*"
 pyrender = "*"
 libigl = "*"
