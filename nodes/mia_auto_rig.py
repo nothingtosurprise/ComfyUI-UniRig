@@ -5,6 +5,14 @@ MIAAutoRig - Fast humanoid rigging using Make-It-Animatable.
 import logging
 import time
 from pathlib import Path
+import comfy.utils
+
+from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -16,7 +24,7 @@ except ImportError:
     OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
 
-class MIAAutoRig:
+class MIAAutoRig(io.ComfyNode):
     """
     Fast humanoid rigging using Make-It-Animatable.
 
@@ -27,41 +35,33 @@ class MIAAutoRig:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "trimesh": ("TRIMESH",),
-                "model": ("MIA_MODEL", {
-                    "tooltip": "Pre-loaded MIA model (from MIALoadModel)"
-                }),
-            },
-            "optional": {
-                "fbx_name": ("STRING", {
-                    "default": "",
-                    "tooltip": "Custom filename for saved FBX (without extension). If empty, uses auto-generated name."
-                }),
-                "no_fingers": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Merge finger weights to hand bone. Enable if model doesn't have separate fingers."
-                }),
-                "use_normal": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Use surface normals for better skinning weights. Helps when limbs are close together."
-                }),
-                "reset_to_rest": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Transform output to T-pose rest position for animation compatibility."
-                }),
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MIAAutoRig",
+            display_name="MIA: Auto Rig",
+            category="UniRig/MIA",
+            description="Fast humanoid rigging using Make-It-Animatable. Takes a mesh and outputs a Mixamo-compatible rigged FBX file. Optimized for humanoid characters - faster than UniRig (<1 second).",
+            inputs=[
+                io.Custom("TRIMESH").Input("trimesh"),
+                io.Custom("MIA_MODEL").Input("model",
+                    tooltip="Pre-loaded MIA model (from MIALoadModel)"),
+                io.String.Input("fbx_name", default="", optional=True,
+                                tooltip="Custom filename for saved FBX (without extension). If empty, uses auto-generated name."),
+                io.Boolean.Input("no_fingers", default=True, optional=True,
+                                 tooltip="Merge finger weights to hand bone. Enable if model doesn't have separate fingers."),
+                io.Boolean.Input("use_normal", default=False, optional=True,
+                                 tooltip="Use surface normals for better skinning weights. Helps when limbs are close together."),
+                io.Boolean.Input("reset_to_rest", default=True, optional=True,
+                                 tooltip="Transform output to T-pose rest position for animation compatibility."),
+            ],
+            outputs=[
+                io.String.Output(display_name="fbx_output_path"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("fbx_output_path",)
-    FUNCTION = "auto_rig"
-    CATEGORY = "UniRig/MIA"
-
-    def auto_rig(
-        self,
+    @classmethod
+    def execute(
+        cls,
         trimesh,
         model,
         fbx_name="",
@@ -87,6 +87,9 @@ class MIAAutoRig:
         if hasattr(trimesh, 'visual') and hasattr(trimesh.visual, 'material'):
             log.debug("  Material: %s", type(trimesh.visual.material).__name__)
 
+        # Progress bar for MIA pipeline steps (load models, inference, export)
+        pbar = comfy.utils.ProgressBar(3)
+
         log.info("Starting Make-It-Animatable rigging pipeline...")
         log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s", no_fingers, use_normal, reset_to_rest)
 
@@ -97,6 +100,10 @@ class MIAAutoRig:
         # Load models internally (downloads from HuggingFace if needed)
         cache_key = load_mia_models(dtype=dtype)
         models = get_cached_models(cache_key)
+        pbar.update(1)
+
+        # Check for interruption before inference
+        _mm().throw_exception_if_processing_interrupted()
 
         # Generate output filename
         if fbx_name:
@@ -119,6 +126,8 @@ class MIAAutoRig:
             reset_to_rest=reset_to_rest,
         )
 
+        pbar.update(2)
+
         total_time = time.time() - total_start
         log.info("========================================")
         log.info("Make-It-Animatable rigging complete!")
@@ -126,4 +135,4 @@ class MIAAutoRig:
         log.info("Output: %s", result_path)
         log.info("========================================")
 
-        return (result_path,)
+        return io.NodeOutput(result_path)
