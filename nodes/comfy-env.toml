@@ -1,23 +1,33 @@
 python = "3.11"  # Required by bpy 4.2
 
+[dependencies]
+c-compiler = "*"
+av = "*"
+numpy = "<2.0"
+ffmpeg = "*"
+igl = "*"
+
+[target.linux-64.dependencies]
+mesalib = "*"        # replaces apt: libgl1-mesa-glx
+libglu = "*"         # replaces apt: libglu1-mesa
+xorg-libsm = "*"     # libSM.so.6 required by bpy
+cuda-cccl = "*"
+
+[target.win-64.dependencies]
+cuda-cccl = "*"
+
 [cuda]
-packages = ["torch-scatter", "torch-cluster", "flash-attn", "torch", "torchvision", "cumm", "spconv"]
+packages = ["torch-scatter", "torch-cluster", "flash-attn", "cumm", "spconv"]
 
 [pypi-dependencies]
 # Blender
 bpy = ">=4.2,<4.3"
-
-# Core
-numpy = "<2.0"
 trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
-comfy-sparse-attn = "*"
-
-# ML libs
+comfy-sparse-attn = "==0.0.8"
 transformers = "==4.51.3"
-pytorch_lightning = "*"
-lightning = "*"
+pytorch-lightning = "*"
 timm = "*"
 einops = "*"
 addict = "*"
@@ -25,11 +35,8 @@ omegaconf = "*"
 huggingface_hub = "*"
 wandb = "*"
 hf_xet = "*"
-
-# Geometry
 fast-simplification = "*"
 pyrender = "*"
-libigl = "*"
 pccm = "*"
 shapely = "*"
 
