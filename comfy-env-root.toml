@@ -1,10 +1,6 @@
 [node_reqs]
 ComfyUI-CameraPack = "PozzettiAndrea/ComfyUI-CameraPack"
 
-[dependencies]
-av = "*"
-ffmpeg = "*"
-
 [target.osx-arm64.dependencies]
 av = "*"
 ffmpeg = "*"
