@@ -1,3 +1,7 @@
+[workspace]
+channels = ["conda-forge", "pozzettiandrea"]
+
+
 [dependencies]
 c-compiler = "*"
 av = "*"
