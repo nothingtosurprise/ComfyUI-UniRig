@@ -5,7 +5,6 @@ channels = ["conda-forge", "pozzettiandrea"]
 [dependencies]
 c-compiler = "*"
 av = "*"
-numpy = "<2.0"
 ffmpeg = "*"
 igl = "*"
 bpy = {version = "*", channel = "pozzettiandrea"}
