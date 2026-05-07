@@ -340,10 +340,12 @@ def _export_fbx(model_armature, model_meshes, output_fbx):
     else:
         log.warning("PIL not available, skipping image alpha fix")
 
+    from ._bpy_compat import set_material_opaque
     for mat in bpy.data.materials:
         if mat:
-            mat.blend_method = 'OPAQUE'
-            mat.shadow_method = 'OPAQUE'
+            # Blender 4.2 removed `shadow_method`; portable shim for
+            # 4.1/4.2/4.3+/5.x lives in _bpy_compat.
+            set_material_opaque(mat)
             if mat.use_nodes and mat.node_tree:
                 # Find nodes that are ONLY connected to Alpha (and remove them)
                 nodes_to_remove = []
