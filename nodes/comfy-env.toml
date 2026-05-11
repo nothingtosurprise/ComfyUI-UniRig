@@ -1,11 +1,13 @@
-python = "3.11"  # Required by bpy 4.2
+[workspace]
+channels = ["conda-forge", "pozzettiandrea"]
+
 
 [dependencies]
 c-compiler = "*"
 av = "*"
-numpy = "<2.0"
 ffmpeg = "*"
 igl = "*"
+bpy = {version = "*", channel = "pozzettiandrea"}
 
 [target.linux-64.dependencies]
 mesalib = "*"        # replaces apt: libgl1-mesa-glx
@@ -21,12 +23,11 @@ packages = ["torch-scatter", "torch-cluster", "flash-attn", "cumm", "spconv"]
 
 [pypi-dependencies]
 # Blender
-bpy = ">=4.2,<4.3"
 trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
-comfy-sparse-attn = "==0.0.8"
-transformers = "==4.51.3"
+comfy-sparse-attn = "==0.0.9"
+transformers = "*"
 pytorch-lightning = "*"
 timm = "*"
 einops = "*"
