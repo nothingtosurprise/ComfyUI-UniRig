@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-unirig"
-description = "Automatic skeleton extraction for ComfyUI using UniRig (SIGGRAPH 2025)"
+description = "Warning, uses experimental package `comfy-env` to attempt a one click isolated install. Will download and use pixi package manager. Automatic skeleton extraction for ComfyUI using UniRig (SIGGRAPH 2025)"
 version = "1.6.5"
 license = {file = "LICENSE"}
 
